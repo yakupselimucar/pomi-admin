@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data:; connect-src https://ndkewpwpojjhqbeqtzth.supabase.co wss://ndkewpwpojjhqbeqtzth.supabase.co; base-uri 'none'; form-action 'none'">
+  <title>Pomi Moderasyon</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8D%85%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <!-- Sürüm sabit + SRI: CDN'de dosya değişirse tarayıcı çalıştırmaz. Güncellerken README'deki komutla özet yeniden hesaplanır. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.116.0/dist/umd/supabase.js" integrity="sha384-iLddHTLokph6Omwoyid4XKxHaWa6w41BnoEj0q5oOrzmYPpHIKt1wyjReA7s//pP" crossorigin="anonymous" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span aria-hidden="true">🍅</span> <strong>Pomi</strong> <span class="brand-sub">Moderasyon</span></div>
+    <div id="session" class="session"></div>
+  </header>
+  <main id="app" class="page" aria-live="polite">
+    <p class="muted">Yükleniyor…</p>
+  </main>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+  <noscript><p class="page">Bu panel JavaScript gerektirir.</p></noscript>
+</body>
+</html>
