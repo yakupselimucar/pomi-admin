@@ -1162,27 +1162,31 @@
     const translations = row.translations ?? {};
     const tr = translations.tr ?? {};
     const others = Object.entries(translations).filter(([lang]) => lang !== 'tr');
-    return h('article', { class: 'card' },
-      h('div', { class: 'chips' },
-        kindChip(row.kind),
-        scheduled
-          ? h('span', { class: 'chip chip-soft', text: `Zamanlandı · ${formatShort(row.published_at)}` })
-          : h('span', { class: 'chip chip-ok', text: 'Yayında' }),
-        others.length
-          ? h('span', { class: 'chip chip-small', text: `+${others.length} dil` })
-          : h('span', { class: 'chip chip-small', text: 'Yalnız TR' })),
-      h('strong', { class: 'name', text: tr.title ?? '' }),
-      h('p', { class: 'content-body', text: tr.body ?? '' }),
+    return h('article', { class: 'card announcement-card' },
+      h('div', { class: 'announcement-header' },
+        h('div', { class: 'chips' },
+          kindChip(row.kind),
+          scheduled
+            ? h('span', { class: 'chip chip-soft', text: `Zamanlandı · ${formatShort(row.published_at)}` })
+            : h('span', { class: 'chip chip-ok', text: 'Yayında' }),
+          others.length
+            ? h('span', { class: 'chip chip-small', text: `+${others.length} dil` })
+            : h('span', { class: 'chip chip-small', text: 'Yalnız TR' })),
+        h('div', { class: 'announcement-author', title: 'Duyuruyu oluşturan yönetici' },
+          h('span', { class: 'author-icon', 'aria-hidden': 'true', text: '✍️' }),
+          h('span', { class: 'author-label', text: 'Yazan:' }),
+          h('strong', { class: 'author-name', text: row.author_name ?? '—' }))),
+      h('strong', { class: 'name announcement-title', text: tr.title ?? '' }),
+      h('p', { class: 'announcement-body', text: tr.body ?? '' }),
       others.length
         ? h('details', null,
           h('summary', { text: 'Diğer diller' }),
           others.map(([lang, value]) => h('div', { class: 'stack' },
             h('strong', { text: `${langLabel(lang)}: ${value.title}` }),
-            h('p', { class: 'content-body', text: value.body ?? '' }))))
+            h('p', { class: 'announcement-body', text: value.body ?? '' }))))
         : null,
       h('dl', { class: 'meta' },
         metaItem('Duyuru saati', formatDate(row.published_at)),
-        metaItem('Yazan', row.author_name ?? '—'),
         row.updated_at && row.updated_at !== row.created_at
           ? metaItem('Son düzenleme', formatDate(row.updated_at))
           : null),

@@ -542,6 +542,9 @@ textarea {
   width: 100%;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.content:has(.content-toggle):not(.is-revealed) .content-body {
   filter: blur(7px);
   user-select: none;
 }
@@ -550,6 +553,57 @@ textarea {
 .content:not(:has(.content-toggle)) .content-body {
   filter: none;
   user-select: text;
+}
+
+/* ─── Duyurular ──────────────────────────────────────────────────────────── */
+
+.announcement-card {
+  display: grid;
+  gap: 12px;
+}
+
+.announcement-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.announcement-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--soft);
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.announcement-author .author-name {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.announcement-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.announcement-body {
+  width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  line-height: 1.55;
+  color: var(--text);
 }
 
 .meta {
