@@ -64,9 +64,21 @@
     ['feature', 'Yeni özellik', 'chip-warn'],
     ['update', 'Güncelleme', 'chip-done'],
     ['event', 'Etkinlik', ''],
+    ['important', 'Önemli', 'chip-danger'],
   ];
   const ANNOUNCEMENT_TITLE_MAX = 80;
   const ANNOUNCEMENT_BODY_MAX = 600;
+  // Duyuru dilleri. `tr` her zaman zorunludur; diğerleri düzenleme diyaloğunda seçerek eklenir.
+  const ANNOUNCEMENT_LANGUAGES = [
+    ['tr', 'Türkçe'], ['en', 'İngilizce'], ['de', 'Almanca'], ['fr', 'Fransızca'],
+    ['es', 'İspanyolca'], ['it', 'İtalyanca'], ['pt', 'Portekizce'], ['ru', 'Rusça'],
+    ['ar', 'Arapça'], ['fa', 'Farsça'], ['ur', 'Urduca'], ['hi', 'Hintçe'],
+    ['zh', 'Çince'], ['ja', 'Japonca'], ['ko', 'Korece'], ['nl', 'Felemenkçe'],
+    ['pl', 'Lehçe'], ['sv', 'İsveççe'], ['el', 'Yunanca'], ['az', 'Azerbaycan Türkçesi'],
+    ['uk', 'Ukraynaca'], ['ro', 'Rumence'], ['cs', 'Çekçe'], ['hu', 'Macarca'],
+    ['th', 'Tayca'], ['vi', 'Vietnamca'], ['id', 'Endonezce'], ['ms', 'Malayca'],
+    ['he', 'İbranice'], ['bg', 'Bulgarca'],
+  ];
   const BAN_DURATIONS = [
     ['24', '24 saat'],
     ['168', '7 gün'],
@@ -96,11 +108,9 @@
     ['no_reports', 'İşlem yapılacak şikayet yok.'],
     ['invalid_kind', 'Duyuru türü seç.'],
     ['tr_required', 'Türkçe başlık ve metin zorunlu.'],
-    ['en_incomplete', 'İngilizce için başlık ve metnin ikisini de yaz ya da ikisini de boş bırak.'],
+    ['translation_incomplete', 'Eklediğin her dil için başlık ve metnin ikisini de doldur, ya da o dili kaldır.'],
+    ['translation_too_long', 'Başlık en fazla 80, metin en fazla 600 karakter olabilir.'],
     ['announcement_not_found', 'Duyuru bulunamadı (silinmiş olabilir).'],
-    ['announcements_title', 'Başlık en fazla 80 karakter olabilir.'],
-    ['announcements_body', 'Metin en fazla 600 karakter olabilir.'],
-    ['announcements_en_pair', 'İngilizce başlık en fazla 80, metin en fazla 600 karakter olabilir.'],
     ['failed to fetch', 'Bağlantı kurulamadı. İnternetini kontrol et.'],
     ['networkerror', 'Bağlantı kurulamadı. İnternetini kontrol et.'],
   ];
@@ -1148,20 +1158,26 @@
 
   function announcementCard(row) {
     const scheduled = (toDate(row.published_at)?.getTime() ?? 0) > Date.now();
+    const translations = row.translations ?? {};
+    const tr = translations.tr ?? {};
+    const others = Object.entries(translations).filter(([lang]) => lang !== 'tr');
     return h('article', { class: 'card' },
       h('div', { class: 'chips' },
         kindChip(row.kind),
         scheduled
           ? h('span', { class: 'chip chip-soft', text: `Zamanlandı · ${formatShort(row.published_at)}` })
           : h('span', { class: 'chip chip-ok', text: 'Yayında' }),
-        row.title_en ? h('span', { class: 'chip chip-small', text: 'EN var' }) : h('span', { class: 'chip chip-small', text: 'Yalnız TR' })),
-      h('strong', { class: 'name', text: row.title_tr }),
-      h('p', { class: 'content-body', text: row.body_tr }),
-      row.title_en
+        others.length
+          ? h('span', { class: 'chip chip-small', text: `+${others.length} dil` })
+          : h('span', { class: 'chip chip-small', text: 'Yalnız TR' })),
+      h('strong', { class: 'name', text: tr.title ?? '' }),
+      h('p', { class: 'content-body', text: tr.body ?? '' }),
+      others.length
         ? h('details', null,
-          h('summary', { text: 'İngilizce' }),
-          h('strong', { text: row.title_en }),
-          h('p', { class: 'content-body', text: row.body_en ?? '' }))
+          h('summary', { text: 'Diğer diller' }),
+          others.map(([lang, value]) => h('div', { class: 'stack' },
+            h('strong', { text: `${langLabel(lang)}: ${value.title}` }),
+            h('p', { class: 'content-body', text: value.body ?? '' }))))
         : null,
       h('dl', { class: 'meta' },
         metaItem('Duyuru saati', formatDate(row.published_at)),
@@ -1172,6 +1188,10 @@
       h('div', { class: 'actions' },
         button('Düzenle', () => announcementDialog(row)),
         button('Sil', () => deleteAnnouncementDialog(row), 'danger')));
+  }
+
+  function langLabel(code) {
+    return ANNOUNCEMENT_LANGUAGES.find(([id]) => id === code)?.[1] ?? code;
   }
 
   function textInput(id, label, { maxLength, required = false, help = null, value = '' } = {}) {
@@ -1187,80 +1207,105 @@
     return { wrap, input };
   }
 
-  /** `datetime-local` alanının beklediği yerel "YYYY-MM-DDTHH:MM" biçimi. */
-  function toLocalInputValue(date) {
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-      + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  /** Bir dil için başlık+metin alanlarını oluşturur; TR hariç kaldırma düğmesi taşır. */
+  function languageBlock(lang, { title = '', body = '' } = {}, onRemove) {
+    const titleField = textInput(`ann-title-${lang}`, `Başlık (${langLabel(lang)})`, {
+      maxLength: ANNOUNCEMENT_TITLE_MAX, required: lang === 'tr', value: title,
+    });
+    const bodyField = textArea(`ann-body-${lang}`, `Metin (${langLabel(lang)})`, {
+      required: lang === 'tr', maxLength: ANNOUNCEMENT_BODY_MAX,
+    });
+    bodyField.input.value = body;
+    const wrap = h('div', { class: 'stack lang-block' },
+      lang === 'tr'
+        ? null
+        : h('div', { class: 'actions' },
+          h('span', { class: 'muted small', text: langLabel(lang) }),
+          button('Bu dili kaldır', () => onRemove(), 'ghost')),
+      titleField.wrap, bodyField.wrap);
+    return { lang, wrap, titleField, bodyField };
   }
 
   function announcementDialog(row) {
     const editing = Boolean(row);
     const kind = radioGroup('ann-kind', 'Tür',
       ANNOUNCEMENT_KINDS.map(([id, label]) => [id, label]), row?.kind ?? 'feature');
-    const titleTr = textInput('ann-title-tr', 'Başlık (TR)', {
-      maxLength: ANNOUNCEMENT_TITLE_MAX, required: true, value: row?.title_tr ?? '',
-    });
-    const bodyTr = textArea('ann-body-tr', 'Metin (TR)', { required: true, maxLength: ANNOUNCEMENT_BODY_MAX });
-    bodyTr.input.value = row?.body_tr ?? '';
-    const titleEn = textInput('ann-title-en', 'Başlık (EN, opsiyonel)', {
-      maxLength: ANNOUNCEMENT_TITLE_MAX, value: row?.title_en ?? '',
-      help: 'Boş bırakılırsa İngilizce kullanıcılar Türkçe metni görür.',
-    });
-    const bodyEn = textArea('ann-body-en', 'Metin (EN, opsiyonel)', { maxLength: ANNOUNCEMENT_BODY_MAX });
-    bodyEn.input.value = row?.body_en ?? '';
 
-    const when = h('input', { id: 'ann-when', type: 'datetime-local', 'aria-describedby': 'ann-when-help' });
-    const initial = toDate(row?.published_at);
-    if (initial) when.value = toLocalInputValue(initial);
-    const whenField = h('div', { class: 'field' },
-      h('label', { for: 'ann-when', text: 'Duyuru saati' }),
-      when,
-      h('p', {
-        id: 'ann-when-help',
-        class: 'help',
-        text: editing
-          ? 'Uygulamada kartın üstünde görünür. Boşaltırsan mevcut saat korunur.'
-          : 'Boş bırakırsan hemen yayınlanır. İleri bir saat seçersen o ana kadar gizli kalır.',
-      }));
+    const initialTranslations = row?.translations ?? { tr: { title: '', body: '' } };
+    const blocks = new Map();
+    const langsWrap = h('div', { class: 'stack' });
+
+    const addLangSelect = h('select', { id: 'ann-add-lang' });
+    const addLangField = h('div', { class: 'field' },
+      h('label', { for: 'ann-add-lang', text: 'Dil ekle' }),
+      h('div', { class: 'actions' },
+        addLangSelect,
+        button('Ekle', () => {
+          const lang = addLangSelect.value;
+          if (!lang || blocks.has(lang)) return;
+          addBlock(lang, {});
+          refreshLangOptions();
+        })));
+
+    function refreshLangOptions() {
+      const available = ANNOUNCEMENT_LANGUAGES.filter(([id]) => !blocks.has(id));
+      addLangSelect.replaceChildren(
+        ...available.map(([id, label]) => h('option', { value: id, text: label })));
+      addLangField.hidden = available.length === 0;
+    }
+
+    function addBlock(lang, value) {
+      const block = languageBlock(lang, value, () => {
+        blocks.delete(lang);
+        block.wrap.remove();
+        refreshLangOptions();
+      });
+      blocks.set(lang, block);
+      langsWrap.append(block.wrap);
+    }
+
+    addBlock('tr', initialTranslations.tr ?? {});
+    Object.entries(initialTranslations)
+      .filter(([lang]) => lang !== 'tr')
+      .forEach(([lang, value]) => addBlock(lang, value));
+    refreshLangOptions();
 
     openDialog({
       title: editing ? 'Duyuruyu düzenle' : 'Yeni duyuru',
-      fields: [kind.el, titleTr.wrap, bodyTr.wrap, titleEn.wrap, bodyEn.wrap, whenField],
+      intro: editing
+        ? 'Yayın saati değişmez; ilk yayınlandığı an korunur.'
+        : 'Yayın saati kaydettiğin an otomatik atanır.',
+      fields: [kind.el, langsWrap, addLangField],
       confirmText: editing ? 'Kaydet' : 'Yayınla',
       onConfirm: async () => {
-        const trim = (input) => input.value.trim();
-        if (!trim(titleTr.input) || !trim(bodyTr.input)) throw new UserError('Türkçe başlık ve metin zorunlu.');
-        if (Boolean(trim(titleEn.input)) !== Boolean(trim(bodyEn.input))) {
-          throw new UserError('İngilizce için başlık ve metnin ikisini de yaz ya da ikisini de boş bırak.');
+        const translations = {};
+        for (const { lang, titleField, bodyField } of blocks.values()) {
+          const title = titleField.input.value.trim();
+          const body = bodyField.input.value.trim();
+          if (!title && !body) continue;
+          if (!title || !body) {
+            throw new UserError(`${langLabel(lang)} için başlık ve metnin ikisini de doldur, ya da o dili kaldır.`);
+          }
+          translations[lang] = { title, body };
         }
-        let publishedAt = null;
-        if (when.value) {
-          const parsed = new Date(when.value);
-          if (Number.isNaN(parsed.getTime())) throw new UserError('Duyuru saati geçersiz.');
-          publishedAt = parsed.toISOString();
-        }
+        if (!translations.tr) throw new UserError('Türkçe başlık ve metin zorunlu.');
         await rpc('admin_save_announcement', {
           p_id: row?.id ?? null,
           p_kind: kind.value(),
-          p_title_tr: trim(titleTr.input),
-          p_body_tr: trim(bodyTr.input),
-          p_title_en: trim(titleEn.input) || null,
-          p_body_en: trim(bodyEn.input) || null,
-          p_published_at: publishedAt,
+          p_translations: translations,
         });
         toast(editing ? 'Duyuru kaydedildi' : 'Duyuru yayınlandı');
         afterMutation();
       },
     });
     // Metin alanı yerine başlıkta başla.
-    titleTr.input.focus();
+    blocks.get('tr').titleField.input.focus();
   }
 
   function deleteAnnouncementDialog(row) {
     openDialog({
       title: 'Duyuru silinsin mi?',
-      intro: `“${row.title_tr}” tüm kullanıcılardan kaldırılır. Bu işlem geri alınamaz.`,
+      intro: `“${row.translations?.tr?.title ?? ''}” tüm kullanıcılardan kaldırılır. Bu işlem geri alınamaz.`,
       confirmText: 'Sil',
       tone: 'danger',
       onConfirm: async () => {
