@@ -65,6 +65,7 @@
     ['update', 'Güncelleme', 'chip-done'],
     ['event', 'Etkinlik', ''],
     ['important', 'Önemli', 'chip-danger'],
+    ['fix', 'Hata Düzeltmesi', 'chip-soft'],
   ];
   const ANNOUNCEMENT_TITLE_MAX = 80;
   const ANNOUNCEMENT_BODY_MAX = 600;
