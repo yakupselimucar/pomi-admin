@@ -55,7 +55,18 @@
     reports_remove: 'Mesaj kaldırıldı',
     ban: 'Yasaklandı',
     unban: 'Yasak kaldırıldı',
+    announcement_create: 'Duyuru yayınlandı',
+    announcement_update: 'Duyuru düzenlendi',
+    announcement_delete: 'Duyuru silindi',
   };
+  // Sunucu ikizi `announcements_kind_check`; renkler uygulamadaki etiketlerle aynı.
+  const ANNOUNCEMENT_KINDS = [
+    ['feature', 'Yeni özellik', 'chip-warn'],
+    ['update', 'Güncelleme', 'chip-done'],
+    ['event', 'Etkinlik', ''],
+  ];
+  const ANNOUNCEMENT_TITLE_MAX = 80;
+  const ANNOUNCEMENT_BODY_MAX = 600;
   const BAN_DURATIONS = [
     ['24', '24 saat'],
     ['168', '7 gün'],
@@ -83,6 +94,13 @@
     ['user_not_found', 'Kullanıcı bulunamadı (hesap silinmiş olabilir).'],
     ['query_too_short', 'En az 2 karakter yaz.'],
     ['no_reports', 'İşlem yapılacak şikayet yok.'],
+    ['invalid_kind', 'Duyuru türü seç.'],
+    ['tr_required', 'Türkçe başlık ve metin zorunlu.'],
+    ['en_incomplete', 'İngilizce için başlık ve metnin ikisini de yaz ya da ikisini de boş bırak.'],
+    ['announcement_not_found', 'Duyuru bulunamadı (silinmiş olabilir).'],
+    ['announcements_title', 'Başlık en fazla 80 karakter olabilir.'],
+    ['announcements_body', 'Metin en fazla 600 karakter olabilir.'],
+    ['announcements_en_pair', 'İngilizce başlık en fazla 80, metin en fazla 600 karakter olabilir.'],
     ['failed to fetch', 'Bağlantı kurulamadı. İnternetini kontrol et.'],
     ['networkerror', 'Bağlantı kurulamadı. İnternetini kontrol et.'],
   ];
@@ -557,12 +575,14 @@
 
   const TABS = [
     ['reports', 'Şikayetler'],
+    ['announcements', 'Duyurular'],
     ['bans', 'Yasaklılar'],
     ['users', 'Kullanıcılar'],
     ['log', 'İşlem kaydı'],
   ];
   const VIEWS = {
     reports: () => loadReports(),
+    announcements: () => loadAnnouncements(),
     bans: () => loadBans(),
     users: () => renderUsers(),
     log: () => loadLog(),
@@ -1051,6 +1071,9 @@
 
   function actionDetails(row) {
     const details = row.details ?? {};
+    if (row.action.startsWith('announcement_')) {
+      return details.title ? `“${details.title}”` : '';
+    }
     if (row.action === 'ban') {
       return `${durationLabel(details.hours ?? null)} · ${details.reason ?? ''}`;
     }
@@ -1088,6 +1111,164 @@
           details ? h('p', { class: 'muted small', text: details }) : null),
         h('span', { class: 'muted small', text: row.admin_name }));
     }));
+  }
+
+  // ─── Duyurular ────────────────────────────────────────────────────────────
+
+  function kindChip(kind) {
+    const [, label, tone] = ANNOUNCEMENT_KINDS.find(([id]) => id === kind) ?? [kind, kind, ''];
+    return h('span', { class: `chip ${tone}`.trim(), text: label });
+  }
+
+  async function loadAnnouncements() {
+    const token = ++viewToken;
+    const list = h('div', { class: 'list', 'aria-busy': 'true' }, h('p', { class: 'muted', text: 'Yükleniyor…' }));
+    view().replaceChildren(
+      viewHeader('Duyurular',
+        button('Yenile', () => loadAnnouncements()),
+        button('Yeni duyuru', () => announcementDialog(null), 'primary')),
+      h('p', {
+        class: 'muted small',
+        text: 'Uygulamada sayaç ekranındaki raydan, zil ikonuyla açılır. Okunmamış olanlar rozetle '
+          + 'görünür. Push bildirimi gönderilmez. Yayın zamanı ileri bir tarihse duyuru o ana kadar gizli kalır.',
+      }),
+      list);
+
+    let rows;
+    try {
+      rows = await rpc('admin_list_announcements', { p_limit: 200 });
+    } catch (err) {
+      if (token === viewToken) list.replaceChildren(errorState(err, () => loadAnnouncements()));
+      return;
+    }
+    if (token !== viewToken) return;
+    list.removeAttribute('aria-busy');
+    list.replaceChildren(...(rows.length ? rows.map(announcementCard) : [emptyState('Henüz duyuru yok.')]));
+  }
+
+  function announcementCard(row) {
+    const scheduled = (toDate(row.published_at)?.getTime() ?? 0) > Date.now();
+    return h('article', { class: 'card' },
+      h('div', { class: 'chips' },
+        kindChip(row.kind),
+        scheduled
+          ? h('span', { class: 'chip chip-soft', text: `Zamanlandı · ${formatShort(row.published_at)}` })
+          : h('span', { class: 'chip chip-ok', text: 'Yayında' }),
+        row.title_en ? h('span', { class: 'chip chip-small', text: 'EN var' }) : h('span', { class: 'chip chip-small', text: 'Yalnız TR' })),
+      h('strong', { class: 'name', text: row.title_tr }),
+      h('p', { class: 'content-body', text: row.body_tr }),
+      row.title_en
+        ? h('details', null,
+          h('summary', { text: 'İngilizce' }),
+          h('strong', { text: row.title_en }),
+          h('p', { class: 'content-body', text: row.body_en ?? '' }))
+        : null,
+      h('dl', { class: 'meta' },
+        metaItem('Duyuru saati', formatDate(row.published_at)),
+        metaItem('Yazan', row.author_name ?? '—'),
+        row.updated_at && row.updated_at !== row.created_at
+          ? metaItem('Son düzenleme', formatDate(row.updated_at))
+          : null),
+      h('div', { class: 'actions' },
+        button('Düzenle', () => announcementDialog(row)),
+        button('Sil', () => deleteAnnouncementDialog(row), 'danger')));
+  }
+
+  function textInput(id, label, { maxLength, required = false, help = null, value = '' } = {}) {
+    const input = h('input', {
+      id, type: 'text', maxlength: String(maxLength), required, autocomplete: 'off',
+      'aria-describedby': help ? `${id}-help` : null,
+    });
+    input.value = value;
+    const wrap = h('div', { class: 'field' },
+      h('label', { for: id, text: label }),
+      input,
+      help ? h('p', { id: `${id}-help`, class: 'help', text: help }) : null);
+    return { wrap, input };
+  }
+
+  /** `datetime-local` alanının beklediği yerel "YYYY-MM-DDTHH:MM" biçimi. */
+  function toLocalInputValue(date) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+      + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function announcementDialog(row) {
+    const editing = Boolean(row);
+    const kind = radioGroup('ann-kind', 'Tür',
+      ANNOUNCEMENT_KINDS.map(([id, label]) => [id, label]), row?.kind ?? 'feature');
+    const titleTr = textInput('ann-title-tr', 'Başlık (TR)', {
+      maxLength: ANNOUNCEMENT_TITLE_MAX, required: true, value: row?.title_tr ?? '',
+    });
+    const bodyTr = textArea('ann-body-tr', 'Metin (TR)', { required: true, maxLength: ANNOUNCEMENT_BODY_MAX });
+    bodyTr.input.value = row?.body_tr ?? '';
+    const titleEn = textInput('ann-title-en', 'Başlık (EN, opsiyonel)', {
+      maxLength: ANNOUNCEMENT_TITLE_MAX, value: row?.title_en ?? '',
+      help: 'Boş bırakılırsa İngilizce kullanıcılar Türkçe metni görür.',
+    });
+    const bodyEn = textArea('ann-body-en', 'Metin (EN, opsiyonel)', { maxLength: ANNOUNCEMENT_BODY_MAX });
+    bodyEn.input.value = row?.body_en ?? '';
+
+    const when = h('input', { id: 'ann-when', type: 'datetime-local', 'aria-describedby': 'ann-when-help' });
+    const initial = toDate(row?.published_at);
+    if (initial) when.value = toLocalInputValue(initial);
+    const whenField = h('div', { class: 'field' },
+      h('label', { for: 'ann-when', text: 'Duyuru saati' }),
+      when,
+      h('p', {
+        id: 'ann-when-help',
+        class: 'help',
+        text: editing
+          ? 'Uygulamada kartın üstünde görünür. Boşaltırsan mevcut saat korunur.'
+          : 'Boş bırakırsan hemen yayınlanır. İleri bir saat seçersen o ana kadar gizli kalır.',
+      }));
+
+    openDialog({
+      title: editing ? 'Duyuruyu düzenle' : 'Yeni duyuru',
+      fields: [kind.el, titleTr.wrap, bodyTr.wrap, titleEn.wrap, bodyEn.wrap, whenField],
+      confirmText: editing ? 'Kaydet' : 'Yayınla',
+      onConfirm: async () => {
+        const trim = (input) => input.value.trim();
+        if (!trim(titleTr.input) || !trim(bodyTr.input)) throw new UserError('Türkçe başlık ve metin zorunlu.');
+        if (Boolean(trim(titleEn.input)) !== Boolean(trim(bodyEn.input))) {
+          throw new UserError('İngilizce için başlık ve metnin ikisini de yaz ya da ikisini de boş bırak.');
+        }
+        let publishedAt = null;
+        if (when.value) {
+          const parsed = new Date(when.value);
+          if (Number.isNaN(parsed.getTime())) throw new UserError('Duyuru saati geçersiz.');
+          publishedAt = parsed.toISOString();
+        }
+        await rpc('admin_save_announcement', {
+          p_id: row?.id ?? null,
+          p_kind: kind.value(),
+          p_title_tr: trim(titleTr.input),
+          p_body_tr: trim(bodyTr.input),
+          p_title_en: trim(titleEn.input) || null,
+          p_body_en: trim(bodyEn.input) || null,
+          p_published_at: publishedAt,
+        });
+        toast(editing ? 'Duyuru kaydedildi' : 'Duyuru yayınlandı');
+        afterMutation();
+      },
+    });
+    // Metin alanı yerine başlıkta başla.
+    titleTr.input.focus();
+  }
+
+  function deleteAnnouncementDialog(row) {
+    openDialog({
+      title: 'Duyuru silinsin mi?',
+      intro: `“${row.title_tr}” tüm kullanıcılardan kaldırılır. Bu işlem geri alınamaz.`,
+      confirmText: 'Sil',
+      tone: 'danger',
+      onConfirm: async () => {
+        await rpc('admin_delete_announcement', { p_id: row.id });
+        toast('Duyuru silindi');
+        afterMutation();
+      },
+    });
   }
 
   // ─── Diyaloglar ───────────────────────────────────────────────────────────

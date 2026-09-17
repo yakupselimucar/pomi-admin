@@ -14,6 +14,10 @@ ana repoda: `pomi/docs/MODERATION.md`.
   öncesi ve sonrası "Bağlam" ile görülür.
 - **İşlemler:** ihlal yok · mesajı kaldır · gönderen yasakla (24 saat / 7 gün /
   30 gün / kalıcı, gerekçe zorunlu ve kullanıcıya gösterilir) · yasağı kaldır.
+- **Duyurular:** uygulamadaki sayaç ekranının yan rayından (zil) açılan
+  yenilikler sayfası. Tür (yeni özellik / güncelleme / etkinlik), TR başlık +
+  metin zorunlu, EN opsiyonel; duyuru saati ileri bir tarih seçilirse o ana
+  kadar gizli kalır. Push gönderilmez, okunmamış rozeti cihazda tutulur.
 - **Yasaklılar**, **Kullanıcı arama** (kullanıcı adı, tam e-posta ya da kimlik)
   ve **İşlem kaydı** (1 yıl).
 
