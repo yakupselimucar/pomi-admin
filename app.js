@@ -86,10 +86,18 @@
     ['720', '30 gün'],
     ['permanent', 'Kalıcı'],
   ];
+  const BAN_SCOPES = [
+    { id: 'room_create', label: 'Oda Kurma Engeli', desc: 'Yeni oda açamaz (saldırı ve troll odaları önler)', icon: '🚫' },
+    { id: 'chat', label: 'Sohbet & Tepki Engeli', desc: 'Odalarda mesaj yazamaz ve tepki veremez', icon: '💬' },
+    { id: 'room_join', label: 'Odaya Katılma Engeli', desc: 'Odalara üye olamaz ve giremez', icon: '🚪' },
+    { id: 'name_change', label: 'İsim Değiştirme Engeli', desc: 'Profilindeki adını değiştiremez', icon: '✏️' },
+  ];
   const BAN_REASON_PRESETS = [
-    'Taciz / zorbalık içeren mesaj.',
-    'Spam ya da reklam paylaşımı.',
-    'Uygunsuz içerik paylaşımı.',
+    'Uygunsuz oda adı veya oda açarak rahatsızlık verme.',
+    'Uygunsuz, taciz veya nefret içeren kullanıcı adı.',
+    'Oda sohbetinde küfür, taciz veya troll davranış.',
+    'Spam, reklam veya koordineli saldırı.',
+    'Topluluk kurallarının ağır ihlali.',
   ];
 
   // Sunucu hata anahtarı / Supabase Auth mesajı → kullanıcı metni.
@@ -112,6 +120,9 @@
     ['translation_incomplete', 'Eklediğin her dil için başlık ve metnin ikisini de doldur, ya da o dili kaldır.'],
     ['translation_too_long', 'Başlık en fazla 80, metin en fazla 600 karakter olabilir.'],
     ['announcement_not_found', 'Duyuru bulunamadı (silinmiş olabilir).'],
+    ['room_create_banned', 'Bu kullanıcının oda kurma yetkisi askıya alınmış.'],
+    ['name_change_banned', 'Bu kullanıcının isim değiştirme yetkisi askıya alınmış.'],
+    ['room_join_banned', 'Bu kullanıcının odalara katılma yetkisi askıya alınmış.'],
     ['failed to fetch', 'Bağlantı kurulamadı. İnternetini kontrol et.'],
     ['networkerror', 'Bağlantı kurulamadı. İnternetini kontrol et.'],
   ];
@@ -587,6 +598,7 @@
   const TABS = [
     ['reports', 'Şikayetler'],
     ['announcements', 'Duyurular'],
+    ['rooms', 'Odalar'],
     ['bans', 'Yasaklılar'],
     ['users', 'Kullanıcılar'],
     ['log', 'İşlem kaydı'],
@@ -594,6 +606,7 @@
   const VIEWS = {
     reports: () => loadReports(),
     announcements: () => loadAnnouncements(),
+    rooms: () => loadRooms(),
     bans: () => loadBans(),
     users: () => renderUsers(),
     log: () => loadLog(),
@@ -880,9 +893,287 @@
     });
   }
 
+  // ─── Odalar ───────────────────────────────────────────────────────────────
+
+  /**
+   * Tüm odalar, yeniden eskiye. GİZLİ odalar da listelenir: uygunsuz
+   * adlandırma gizli odada da oluyor ve kimse şikayet etmeden görülmüyordu.
+   * Sunucu tarafı `admin_list_rooms` (SECURITY DEFINER + assert_app_admin).
+   *
+   * Mesaj içeriği DÖNMEZ; sohbeti okumak şikayet akışına ait. Buradaki amaç
+   * oda adını ve ölçeğini taramak, gerekirse sahibini tek tıkla yasaklamak.
+   */
+  async function loadRooms() {
+    const filterInput = h('input', {
+      type: 'search',
+      class: 'bans-filter',
+      autocomplete: 'off',
+      placeholder: 'Oda adı, sahip adı ya da oda kimliği…',
+    });
+    const list = h('div', { class: 'list', 'aria-busy': 'true' },
+      h('p', { class: 'muted', text: 'Yükleniyor…' }));
+
+    view().replaceChildren(
+      viewHeader('Odalar', button('Yenile', () => loadRooms())),
+      h('div', { class: 'search-filter-wrap' }, filterInput),
+      list,
+    );
+
+    // Sunucu taraması (500'e kadar) — kutu boşsa tüm liste gelir.
+    let debounceTimer = 0;
+    filterInput.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => fetchRooms(filterInput.value.trim()), 250);
+    });
+
+    async function fetchRooms(query) {
+      const myToken = ++viewToken;
+      list.setAttribute('aria-busy', 'true');
+      let rows;
+      try {
+        rows = await rpc('admin_list_rooms', { p_query: query || null, p_limit: 500 });
+      } catch (err) {
+        if (myToken === viewToken) list.replaceChildren(errorState(err, () => fetchRooms(query)));
+        return;
+      }
+      if (myToken !== viewToken) return;
+      list.removeAttribute('aria-busy');
+      if (!rows.length) {
+        list.replaceChildren(emptyState(query ? 'Eşleşen oda yok.' : 'Hiç oda yok.'));
+        return;
+      }
+      list.replaceChildren(...rows.map(roomCard));
+    }
+
+    function roomCard(row) {
+      const full = row.member_count >= row.max_members;
+      return h('article', { class: 'card' },
+        h('div', { class: 'chips' },
+          h('strong', { class: 'name', text: `${row.emoji ?? '🌱'} ${row.name}` }),
+          row.is_public
+            ? h('span', { class: 'chip chip-small', text: '🌍 Herkese açık' })
+            : h('span', { class: 'chip chip-soft chip-small', text: '🔒 Gizli' }),
+          h('span', {
+            class: full ? 'chip chip-warn chip-small' : 'chip chip-small',
+            text: `${row.member_count}/${row.max_members} kişi`,
+          }),
+          // `banBadge` bitiş tarihi ister; bu listede yok. Yasağın süresini
+          // Yasaklılar sekmesi gösterir, burada yalnız işaret yeter.
+          row.owner_banned
+            ? h('span', { class: 'chip chip-danger chip-small', text: 'Kurucu yasaklı' })
+            : null),
+        h('dl', { class: 'meta' },
+          metaItem('Kurucu', row.owner_username ?? '(hesap silinmiş)'),
+          metaItem('Kuruldu', formatDate(row.created_at)),
+          metaItem('Mesaj', String(row.message_count)),
+          metaItem('Son mesaj', row.last_message_at ? formatDate(row.last_message_at) : '—'),
+          row.invite_code ? metaItem('Davet kodu', row.invite_code) : null),
+        h('div', { class: 'actions' },
+          button('Oda kimliğini kopyala', () => copyText(row.room_id, 'Oda kimliği')),
+          row.owner_id
+            ? button('Kurucuyu yasakla', () => banDialog({
+                userId: row.owner_id,
+                name: row.owner_username,
+              }), 'danger')
+            : null));
+    }
+
+    await fetchRooms('');
+  }
+
   // ─── Yasak ────────────────────────────────────────────────────────────────
 
-  function banDialog({ userId, name, reportIds, messageLive }) {
+  function banDialog({ userId = null, name = null, reportIds = null, messageLive = false } = {}) {
+    let targetUserId = userId;
+    let targetName = name;
+    let selectedUserEl = null;
+    let searchWrapEl = null;
+
+    // 1) Kullanıcı Arama & Seçim Alanı
+    const searchSection = h('div', { class: 'stack' });
+
+    function updateSelectionView() {
+      if (targetUserId) {
+        if (searchWrapEl) searchWrapEl.hidden = true;
+        selectedUserEl.hidden = false;
+        selectedUserEl.replaceChildren(
+          h('div', { class: 'user-select-info' },
+            h('div', { class: 'user-select-title' },
+              h('span', { text: `👤 @${targetName ?? 'Kullanıcı'}` }),
+              h('span', { class: 'chip chip-small chip-done', text: 'Hedef Kullanıcı' })),
+            h('span', { class: 'muted small', text: `Kimlik: ${targetUserId}` })),
+          !userId
+            ? button('Değiştir', () => {
+                targetUserId = null;
+                targetName = null;
+                updateSelectionView();
+              }, 'ghost', { class: 'btn btn-ghost btn-small' })
+            : null
+        );
+      } else {
+        selectedUserEl.hidden = true;
+        if (searchWrapEl) {
+          searchWrapEl.hidden = false;
+          searchWrapEl.querySelector('input')?.focus();
+        }
+      }
+    }
+
+    selectedUserEl = h('div', { class: 'user-select-card', hidden: true });
+
+    if (!targetUserId) {
+      const searchInput = h('input', {
+        id: 'ban-user-query',
+        type: 'search',
+        autocomplete: 'off',
+        placeholder: 'Kullanıcı adı, tam e-posta ya da UUID kimlik…',
+      });
+      const dropdown = h('div', { class: 'user-search-dropdown', hidden: true });
+      searchWrapEl = h('div', { class: 'field' },
+        h('label', { for: 'ban-user-query', text: 'Yasaklanacak kullanıcıyı bul' }),
+        h('div', { class: 'user-search-wrap' }, searchInput, dropdown),
+        h('p', { class: 'help', text: 'Kullanıcı adı yazıldıkça sonuçlar listelenir veya doğrudan UUID kimliği girilebilir.' }));
+
+      let debounceTimer = 0;
+      searchInput.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        const query = searchInput.value.trim();
+        if (query.length < 2) {
+          dropdown.hidden = true;
+          dropdown.replaceChildren();
+          return;
+        }
+
+        debounceTimer = setTimeout(async () => {
+          try {
+            const rows = await rpc('admin_find_users', { p_query: query });
+            if (!rows.length) {
+              dropdown.hidden = false;
+              dropdown.replaceChildren(
+                h('div', { class: 'user-candidate', text: 'Eşleşen kullanıcı bulunamadı.' })
+              );
+              return;
+            }
+            dropdown.hidden = false;
+            dropdown.replaceChildren(...rows.map((row) => {
+              return h('button', {
+                type: 'button',
+                class: 'user-candidate',
+                onclick: () => {
+                  targetUserId = row.user_id;
+                  targetName = row.username;
+                  dropdown.hidden = true;
+                  dropdown.replaceChildren();
+                  searchInput.value = '';
+                  updateSelectionView();
+                },
+              },
+              h('div', { class: 'user-candidate-info' },
+                h('strong', { class: 'user-candidate-name', text: row.username }),
+                h('span', { class: 'chip chip-small', text: `${row.report_total} şikayet` })),
+              banBadge(row.banned, row.banned_until));
+            }));
+          } catch (err) {
+            dropdown.hidden = false;
+            dropdown.replaceChildren(
+              h('div', { class: 'user-candidate', text: `Arama hatası: ${errorText(err)}` })
+            );
+          }
+        }, 250);
+      });
+
+      searchSection.append(searchWrapEl, selectedUserEl);
+    } else {
+      searchSection.append(selectedUserEl);
+    }
+    updateSelectionView();
+
+    // 2) Kapsam Seçimi (Neye Engel Atılacağı)
+    const masterCheck = h('input', { type: 'checkbox', id: 'scope-master' });
+    masterCheck.checked = true;
+
+    const scopeBoxes = {};
+    const scopeGrid = h('div', { class: 'scope-grid' });
+
+    BAN_SCOPES.forEach((scope) => {
+      const box = h('input', { type: 'checkbox', id: `scope-${scope.id}` });
+      box.checked = true;
+      scopeBoxes[scope.id] = box;
+
+      box.addEventListener('change', () => {
+        const allChecked = BAN_SCOPES.every((s) => scopeBoxes[s.id].checked);
+        masterCheck.checked = allChecked;
+      });
+
+      const label = h('label', { class: 'scope-box', for: `scope-${scope.id}` },
+        box,
+        h('div', { class: 'scope-box-text' },
+          h('span', { class: 'scope-box-title', text: `${scope.icon} ${scope.label}` }),
+          h('span', { class: 'scope-box-desc', text: scope.desc })));
+      scopeGrid.append(label);
+    });
+
+    masterCheck.addEventListener('change', () => {
+      const isChecked = masterCheck.checked;
+      BAN_SCOPES.forEach((s) => {
+        scopeBoxes[s.id].checked = isChecked;
+      });
+    });
+
+    const scopeContainer = h('div', { class: 'field scope-container' },
+      h('label', { text: 'Yasak Kapsamı (Neye engel atılacak?)' }),
+      h('label', { class: 'scope-master', for: 'scope-master' },
+        masterCheck,
+        h('span', { text: '🔒 Tüm Topluluk Özellikleri (Tam Engel - Önerilen)' })),
+      scopeGrid);
+
+    // 3) Saldırı & Hızlı Temizlik Önlemleri
+    const resetNameBox = h('input', { type: 'checkbox', id: 'ban-reset-name' });
+    const closeRoomsBox = h('input', { type: 'checkbox', id: 'ban-close-rooms' });
+    const kickRoomsBox = h('input', { type: 'checkbox', id: 'ban-kick-rooms' });
+
+    // Üçü de varsayılan olarak KAPALI. Oda silmek geri alınamaz ve odadaki
+    // diğer herkesi de vurur — en kalabalık odada 48 kişi var. Tek bir
+    // kötü mesaj yüzünden yasaklanan birinin meşru odası buharlaşmamalı.
+    // Saldırı senaryosu için üçünü birden açan bir ön ayar aşağıda.
+
+    // Tek tık: kalıcı tam yasak + tüm temizlik. "Epstein Adası" vakası gibi
+    // dakikaların önemli olduğu anlarda kutuları tek tek aramamak için.
+    const raidPreset = h('button', {
+      type: 'button',
+      class: 'btn btn-danger btn-small',
+      text: '🚨 Saldırı ön ayarı',
+      title: 'Kalıcı tam yasak + odalarını sil + adını sıfırla + odalardan çıkar',
+      onclick: () => {
+        masterCheck.checked = true;
+        BAN_SCOPES.forEach((sc) => { scopeBoxes[sc.id].checked = true; });
+        closeRoomsBox.checked = true;
+        resetNameBox.checked = true;
+        kickRoomsBox.checked = true;
+        duration.select('permanent');
+        if (!reason.input.value.trim()) {
+          reason.input.value = BAN_REASON_PRESETS[3];
+        }
+      },
+    });
+
+    const countermeasuresCard = h('div', { class: 'countermeasure-card' },
+      h('div', { class: 'countermeasure-header' },
+        h('span', { text: '🛡️ Saldırı & Acil Temizlik Önlemleri' }),
+        raidPreset),
+      h('p', { class: 'help', text: 'Hepsi geri alınamaz ve yalnız işaretlediğin kadarı uygulanır. Oda silmek odadaki diğer kullanıcıları da etkiler.' }),
+      h('div', { class: 'countermeasure-options' },
+        h('label', { class: 'countermeasure-option', for: 'ban-close-rooms' },
+          closeRoomsBox,
+          h('span', { text: 'Kullanıcının açtığı tüm odaları sil (içindeki herkes ve mesajlar dahil)' })),
+        h('label', { class: 'countermeasure-option', for: 'ban-reset-name' },
+          resetNameBox,
+          h('span', { text: 'Kullanıcı adını güvenli ada sıfırla (Domates#... yap)' })),
+        h('label', { class: 'countermeasure-option', for: 'ban-kick-rooms' },
+          kickRoomsBox,
+          h('span', { text: 'Kullanıcıyı üye olduğu tüm odalardan çıkar' }))));
+
+    // 4) Süre & Gerekçe
     const duration = radioGroup('ban-duration', 'Süre', BAN_DURATIONS, '24');
     const reason = textArea('ban-reason', 'Gerekçe', {
       required: true,
@@ -909,7 +1200,9 @@
 
     let removeBox = null;
     const fields = [
-      h('p', { class: 'muted small', text: 'Kapsam: sohbet, tepki, oda kurma ve odaya katılma kapanır. Sayaç ve bahçe çalışmaya devam eder.' }),
+      searchSection,
+      scopeContainer,
+      countermeasuresCard,
       duration.el,
       permanentHint,
       reason.wrap,
@@ -923,27 +1216,50 @@
     }
 
     openDialog({
-      title: `${name ?? 'Kullanıcı'} yasaklansın mı?`,
+      title: targetName ? `${targetName} yasaklansın mı?` : 'Kullanıcıyı Yasakla',
       fields,
       confirmText: 'Yasakla',
       tone: 'danger',
       onConfirm: async () => {
+        if (!targetUserId) {
+          throw new UserError('Önce yasaklanacak bir kullanıcı seç.');
+        }
         const text = reason.input.value.trim();
         if (!text) {
           reason.input.focus();
           throw new UserError('Gerekçe zorunlu — kullanıcıya gösterilir.');
         }
+
+        const selectedScopes = [];
+        if (masterCheck.checked) {
+          selectedScopes.push('all');
+        } else {
+          for (const s of BAN_SCOPES) {
+            if (scopeBoxes[s.id]?.checked) selectedScopes.push(s.id);
+          }
+        }
+        if (!selectedScopes.length) {
+          throw new UserError('En az bir yasak kapsamı seçmelisin.');
+        }
+
         const choice = duration.value() ?? '24';
         const hours = choice === 'permanent' ? null : Number(choice);
+
+        // Eski imzaya düşen bir fallback BİLEREK yok. Eski `admin_ban_user`
+        // kapsam tanımıyor, yani "yalnız sohbeti kapat" isteği sessizce TAM
+        // yasağa dönüşürdü — hatalı tarafı ağır olan bir sessiz yükseltme.
+        // Panel ve migration birlikte yayına gidiyor; RPC yoksa hata görünsün.
         await rpc('admin_ban_user', {
-          p_user_id: userId,
+          p_user_id: targetUserId,
           p_hours: hours,
           p_reason: text,
           p_report_ids: reportIds ?? null,
+          p_scopes: selectedScopes,
+          p_reset_username: resetNameBox.checked,
+          p_close_rooms: closeRoomsBox.checked,
+          p_kick_rooms: kickRoomsBox.checked,
         });
 
-        // Yasak zaten uygulandı: kaldırma hatası diyaloğu açık tutup
-        // tekrar "Yasakla"ya bastırmasın, ayrıca bildirilir.
         if (removeBox?.checked) {
           try {
             await rpc('admin_resolve_reports', { p_report_ids: reportIds, p_action: 'remove', p_note: null });
@@ -953,7 +1269,7 @@
             return;
           }
         }
-        toast(`${name ?? 'Kullanıcı'} yasaklandı (${durationLabel(hours)})`);
+        toast(`${targetName ?? 'Kullanıcı'} yasaklandı (${durationLabel(hours)})`);
         afterMutation();
       },
     });
@@ -975,8 +1291,24 @@
 
   async function loadBans() {
     const token = ++viewToken;
+    const filterInput = h('input', {
+      type: 'search',
+      class: 'bans-filter',
+      placeholder: 'Yasaklılar listesinde ara (kullanıcı adı veya gerekçe)…',
+      autocomplete: 'off',
+    });
+    const filterWrap = h('div', { class: 'search-filter-wrap' }, filterInput);
+
     const list = h('div', { class: 'list', 'aria-busy': 'true' }, h('p', { class: 'muted', text: 'Yükleniyor…' }));
-    view().replaceChildren(viewHeader('Yasaklılar', button('Yenile', () => loadBans())), list);
+    view().replaceChildren(
+      viewHeader(
+        'Yasaklılar',
+        button('+ Kullanıcı Engelle', () => banDialog({}), 'danger'),
+        button('Yenile', () => loadBans())
+      ),
+      filterWrap,
+      list
+    );
 
     let rows;
     try {
@@ -988,25 +1320,59 @@
     if (token !== viewToken) return;
     list.removeAttribute('aria-busy');
     if (!rows.length) {
+      filterWrap.hidden = true;
       list.replaceChildren(emptyState('Yasaklı kullanıcı yok.'));
       return;
     }
-    list.replaceChildren(...rows.map((row) => h('article', { class: 'card' },
-      h('div', { class: 'chips' },
-        h('strong', { class: 'name', text: row.username }),
-        row.permanent
-          ? h('span', { class: 'chip chip-danger', text: 'Kalıcı' })
-          : h('span', {
-            class: 'chip chip-warn',
-            text: `${formatShort(row.banned_until)}'e dek · ${formatSpan(toDate(row.banned_until).getTime() - Date.now())} kaldı`,
-          })),
-      h('dl', { class: 'meta' },
-        metaItem('Gerekçe', row.ban_reason ?? '—'),
-        metaItem('Yasaklandı', formatDate(row.banned_at)),
-        metaItem('Toplam şikayet', String(row.report_total))),
-      h('div', { class: 'actions' },
-        button('Kimliği kopyala', () => copyText(row.user_id, 'Kullanıcı kimliği')),
-        button('Yasağı kaldır', () => unbanDialog(row.user_id, row.username), 'primary')))));
+
+    function renderFiltered() {
+      const q = filterInput.value.trim().toLowerCase();
+      const filtered = q
+        ? rows.filter((r) =>
+            (r.username ?? '').toLowerCase().includes(q) ||
+            (r.ban_reason ?? '').toLowerCase().includes(q) ||
+            (r.user_id ?? '').toLowerCase().includes(q))
+        : rows;
+
+      if (!filtered.length) {
+        list.replaceChildren(emptyState('Aramaya uygun yasaklı kullanıcı bulunamadı.'));
+        return;
+      }
+
+      list.replaceChildren(...filtered.map((row) => {
+        const scopes = row.ban_scopes ?? ['all'];
+        const isAll = scopes.includes('all');
+
+        const scopeChips = isAll
+          ? null
+          : h('div', { class: 'scope-badge-group' },
+              scopes.map((s) => {
+                const def = BAN_SCOPES.find((x) => x.id === s);
+                return h('span', { class: 'chip chip-soft chip-small', text: `${def?.icon ?? '🔒'} ${def?.label ?? s}` });
+              }));
+
+        return h('article', { class: 'card' },
+          h('div', { class: 'chips' },
+            h('strong', { class: 'name', text: row.username }),
+            row.permanent
+              ? h('span', { class: 'chip chip-danger', text: 'Kalıcı' })
+              : h('span', {
+                  class: 'chip chip-warn',
+                  text: `${formatShort(row.banned_until)}'e dek · ${formatSpan(toDate(row.banned_until).getTime() - Date.now())} kaldı`,
+                })),
+          scopeChips,
+          h('dl', { class: 'meta' },
+            metaItem('Gerekçe', row.ban_reason ?? '—'),
+            metaItem('Yasaklandı', formatDate(row.banned_at)),
+            metaItem('Toplam şikayet', String(row.report_total))),
+          h('div', { class: 'actions' },
+            button('Kimliği kopyala', () => copyText(row.user_id, 'Kullanıcı kimliği')),
+            button('Yasağı kaldır', () => unbanDialog(row.user_id, row.username), 'primary')));
+      }));
+    }
+
+    filterInput.addEventListener('input', renderFiltered);
+    renderFiltered();
   }
 
   // ─── Kullanıcılar ─────────────────────────────────────────────────────────
@@ -1086,7 +1452,14 @@
       return details.title ? `“${details.title}”` : '';
     }
     if (row.action === 'ban') {
-      return `${durationLabel(details.hours ?? null)} · ${details.reason ?? ''}`;
+      let scopesDesc = '';
+      if (details.scopes?.length && !details.scopes.includes('all')) {
+        const names = details.scopes.map((s) => BAN_SCOPES.find((x) => x.id === s)?.label ?? s).join(', ');
+        scopesDesc = `[${names}] `;
+      }
+      const resetNote = details.reset_username ? ' · İsim sıfırlandı' : '';
+      const closeNote = details.close_rooms ? ' · Odalar kapatıldı' : '';
+      return `${scopesDesc}${durationLabel(details.hours ?? null)} · ${details.reason ?? ''}${resetNote}${closeNote}`;
     }
     return details.note ? `Not: ${details.note}` : '';
   }
@@ -1347,7 +1720,15 @@
       h('legend', { text: legend }),
       options.map(([value, label], i) => h('label', { class: 'radio', for: `${name}-${value}` },
         inputs[i], h('span', { text: label }))));
-    return { el, value: () => inputs.find((input) => input.checked)?.value };
+    return {
+      el,
+      value: () => inputs.find((input) => input.checked)?.value,
+      // Ön ayar butonları seçimi programatik değiştirebilsin diye.
+      select: (value) => {
+        const match = inputs.find((input) => input.value === String(value));
+        if (match) match.checked = true;
+      },
+    };
   }
 
   /**

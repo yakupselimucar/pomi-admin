@@ -18,8 +18,13 @@ ana repoda: `pomi/docs/MODERATION.md`.
   yenilikler sayfası. Tür (yeni özellik / güncelleme / etkinlik), TR başlık +
   metin zorunlu, EN opsiyonel; duyuru saati ileri bir tarih seçilirse o ana
   kadar gizli kalır. Push gönderilmez, okunmamış rozeti cihazda tutulur.
-- **Yasaklılar**, **Kullanıcı arama** (kullanıcı adı, tam e-posta ya da kimlik)
-  ve **İşlem kaydı** (1 yıl).
+- **Yasaklılar:**
+  - **Doğrudan Kullanıcı Engelleme:** Panelden ayrılmadan `+ Kullanıcı Engelle` ile anlık kullanıcı adı/e-posta/UUID arama ve doğrudan yasaklama.
+  - **Granüler Yasak Kapsamı:** Oda kurma engeli, sohbet & tepki engeli, odaya katılma engeli, isim değiştirme engeli veya tam topluluk tecridi seçimi.
+  - **Saldırı Müdahale Seçenekleri:** Saldırganların açtığı açık odaları derhal kapatma/silme, uygunsuz kullanıcı adını güvenli ada (`Domates#...`) sıfırlama, aktif odalardan çıkarma.
+  - **Canlı Liste Filtreleme:** Yasaklılar listesinde kullanıcı adına veya gerekçeye göre anında arama.
+  - İlgili SQL migration dosyası: `migrations/20260919213000_granular_user_bans.sql`.
+- **Kullanıcı arama** (kullanıcı adı, tam e-posta ya da kimlik) ve **İşlem kaydı** (1 yıl).
 
 Oda kurucuları şikayetleri görmez; bu panel tek inceleme yeridir.
 

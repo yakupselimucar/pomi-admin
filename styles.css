@@ -828,3 +828,219 @@ dialog::backdrop {
     transition: none;
   }
 }
+
+/* ─── Doğrudan Kullanıcı Engelleme & Kapsam Seçimi ────────────────────────── */
+
+.search-filter-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.search-filter-wrap input {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-search-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.user-search-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--card);
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 4px 4px 0 var(--shadow);
+  display: grid;
+}
+
+.user-candidate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  transition: background 100ms ease;
+}
+
+.user-candidate:last-child {
+  border-bottom: 0;
+}
+
+.user-candidate:hover,
+.user-candidate:focus-visible {
+  background: var(--soft);
+}
+
+.user-candidate-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.user-candidate-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-select-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--soft);
+  border: 2px solid var(--line);
+  border-radius: 12px;
+}
+
+.user-select-info {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.user-select-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.scope-container {
+  display: grid;
+  gap: 10px;
+}
+
+.scope-master {
+  padding: 10px 14px;
+  background: var(--soft);
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.scope-master:has(input:checked) {
+  background: var(--sun);
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.scope-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.scope-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--soft);
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 100ms ease, border-color 100ms ease;
+}
+
+.scope-box:has(input:checked) {
+  background: var(--card);
+  border-color: var(--ink);
+  box-shadow: 2px 2px 0 var(--shadow);
+}
+
+.scope-box input {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--ink);
+  flex-shrink: 0;
+}
+
+.scope-box-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.scope-box-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.scope-box-desc {
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.countermeasure-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  background: rgba(255, 91, 110, 0.08);
+  border: 2px dashed var(--cherry);
+  border-radius: 12px;
+}
+
+.countermeasure-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 800;
+  font-size: 0.92rem;
+  color: var(--error-text);
+}
+
+.countermeasure-options {
+  display: grid;
+  gap: 8px;
+}
+
+.countermeasure-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.countermeasure-option input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--cherry);
+}
+
+.scope-badge-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
