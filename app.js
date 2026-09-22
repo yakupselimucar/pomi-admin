@@ -738,6 +738,24 @@
     });
   }
 
+  /**
+   * Vakayı kimin açtığı. Tek kişiden gelen seri şikayet ile gerçek bir
+   * kalabalık tepkisi farklı şeylerdir; moderatör bunu kartta görmeli.
+   */
+  function reporterValue(row) {
+    const names = (row.reporter_names ?? []).filter(Boolean);
+    const people = row.reporter_count ?? names.length;
+    if (!names.length) return [h('span', { class: 'muted', text: 'Bilinmiyor' })];
+    const shown = names.slice(0, 3).join(', ');
+    const rest = names.length > 3 ? ` +${names.length - 3}` : '';
+    return [
+      h('strong', { text: shown + rest }),
+      people === 1 && row.report_count > 1
+        ? h('span', { class: 'chip chip-warn chip-small', text: 'tek kişiden' })
+        : null,
+    ];
+  }
+
   function contentBlock(row) {
     const key = row.case_key;
     const hasText = typeof row.body_snapshot === 'string' && row.body_snapshot.length > 0;
@@ -789,6 +807,7 @@
         h('strong', { text: row.sender_name ?? 'Silinmiş hesap' }),
         row.sender_id ? ` · toplam ${row.sender_report_total} şikayet ` : '',
         banBadge(row.sender_banned, row.sender_banned_until)),
+      metaItem('Şikayet eden', ...reporterValue(row)),
       metaItem('Oda', row.room_name ?? 'Silinmiş oda'),
       metaItem('İlk şikayet', `${formatDate(row.first_reported_at)} · ${ago(row.first_reported_at)}`),
       row.report_count > 1 ? metaItem('Son şikayet', formatDate(row.last_reported_at)) : null,
@@ -983,6 +1002,14 @@
 
   // ─── Yasak ────────────────────────────────────────────────────────────────
 
+  /** Geniş yasak diyaloğunda başlıklı bir blok. */
+  function banSection(title, help, ...content) {
+    return h('section', { class: 'ban-section' },
+      h('h3', { class: 'ban-section-title', text: title }),
+      help ? h('p', { class: 'help', text: help }) : null,
+      content);
+  }
+
   function banDialog({ userId = null, name = null, reportIds = null, messageLive = false } = {}) {
     let targetUserId = userId;
     let targetName = name;
@@ -996,20 +1023,23 @@
       if (targetUserId) {
         if (searchWrapEl) searchWrapEl.hidden = true;
         selectedUserEl.hidden = false;
-        selectedUserEl.replaceChildren(
+        // `replaceChildren` null'ı "null" metnine çevirir; h() gibi elemez.
+        // Kartın sağ üstünde görünen "null" yazısı bundandı.
+        const children = [
           h('div', { class: 'user-select-info' },
             h('div', { class: 'user-select-title' },
               h('span', { text: `👤 @${targetName ?? 'Kullanıcı'}` }),
               h('span', { class: 'chip chip-small chip-done', text: 'Hedef Kullanıcı' })),
             h('span', { class: 'muted small', text: `Kimlik: ${targetUserId}` })),
-          !userId
-            ? button('Değiştir', () => {
-                targetUserId = null;
-                targetName = null;
-                updateSelectionView();
-              }, 'ghost', { class: 'btn btn-ghost btn-small' })
-            : null
-        );
+        ];
+        if (!userId) {
+          children.push(button('Değiştir', () => {
+            targetUserId = null;
+            targetName = null;
+            updateSelectionView();
+          }, 'ghost', { class: 'btn btn-ghost btn-small' }));
+        }
+        selectedUserEl.replaceChildren(...children);
       } else {
         selectedUserEl.hidden = true;
         if (searchWrapEl) {
@@ -1120,11 +1150,11 @@
       });
     });
 
-    const scopeContainer = h('div', { class: 'field scope-container' },
-      h('label', { text: 'Yasak Kapsamı (Neye engel atılacak?)' }),
+    const scopeContainer = h('div', { class: 'scope-container' },
       h('label', { class: 'scope-master', for: 'scope-master' },
         masterCheck,
-        h('span', { text: '🔒 Tüm Topluluk Özellikleri (Tam Engel - Önerilen)' })),
+        h('span', { text: 'Tüm topluluk özellikleri — tam engel' }),
+        h('span', { class: 'chip chip-small', text: 'önerilen' })),
       scopeGrid);
 
     // 3) Saldırı & Hızlı Temizlik Önlemleri
@@ -1159,9 +1189,9 @@
 
     const countermeasuresCard = h('div', { class: 'countermeasure-card' },
       h('div', { class: 'countermeasure-header' },
-        h('span', { text: '🛡️ Saldırı & Acil Temizlik Önlemleri' }),
+        h('span', { text: 'Acil temizlik' }),
         raidPreset),
-      h('p', { class: 'help', text: 'Hepsi geri alınamaz ve yalnız işaretlediğin kadarı uygulanır. Oda silmek odadaki diğer kullanıcıları da etkiler.' }),
+      h('p', { class: 'help', text: 'Geri alınamaz; yalnız işaretlediklerin uygulanır. Oda silmek odadaki herkesi etkiler.' }),
       h('div', { class: 'countermeasure-options' },
         h('label', { class: 'countermeasure-option', for: 'ban-close-rooms' },
           closeRoomsBox,
@@ -1174,10 +1204,10 @@
           h('span', { text: 'Kullanıcıyı üye olduğu tüm odalardan çıkar' }))));
 
     // 4) Süre & Gerekçe
-    const duration = radioGroup('ban-duration', 'Süre', BAN_DURATIONS, '24');
+    const duration = radioGroup('ban-duration', 'Süre', BAN_DURATIONS, '24', { hiddenLegend: true });
     const reason = textArea('ban-reason', 'Gerekçe', {
       required: true,
-      help: 'Kullanıcı uygulamada bu gerekçeyi görür. Kısa ve hangi kuralın çiğnendiğini söyleyen bir cümle yaz.',
+      hiddenLabel: true,
     });
     const presets = h('div', { class: 'presets', role: 'group', 'aria-label': 'Hazır gerekçeler' },
       BAN_REASON_PRESETS.map((text) => h('button', {
@@ -1198,16 +1228,18 @@
       permanentHint.hidden = duration.value() !== 'permanent';
     });
 
+    // Geniş diyalogda her şey tek ekranda: solda "kime ve neye", sağda
+    // "ne kadar, neden ve hangi temizlik". Kaydırmadan karar verilebilsin.
+    const layout = h('div', { class: 'ban-layout' },
+      h('div', { class: 'ban-col' },
+        banSection('Yasak kapsamı', 'Hangi topluluk özellikleri kapansın?', scopeContainer),
+        countermeasuresCard),
+      h('div', { class: 'ban-col' },
+        banSection('Süre', null, duration.el, permanentHint),
+        banSection('Gerekçe', 'Kullanıcı uygulamada bu metni görür.', reason.wrap, presets)));
+
     let removeBox = null;
-    const fields = [
-      searchSection,
-      scopeContainer,
-      countermeasuresCard,
-      duration.el,
-      permanentHint,
-      reason.wrap,
-      presets,
-    ];
+    const fields = [searchSection, layout];
     if (reportIds && messageLive) {
       removeBox = h('input', { type: 'checkbox', id: 'ban-remove' });
       removeBox.checked = true;
@@ -1220,6 +1252,7 @@
       fields,
       confirmText: 'Yasakla',
       tone: 'danger',
+      size: 'wide',
       onConfirm: async () => {
         if (!targetUserId) {
           throw new UserError('Önce yasaklanacak bir kullanıcı seç.');
@@ -1698,26 +1731,26 @@
 
   dialog.addEventListener('close', () => dialog.replaceChildren());
 
-  function textArea(id, label, { required = false, help = null, maxLength = 500 } = {}) {
+  function textArea(id, label, { required = false, help = null, maxLength = 500, hiddenLabel = false } = {}) {
     const input = h('textarea', {
       id, rows: '3', maxlength: String(maxLength), required,
       'aria-describedby': help ? `${id}-help` : null,
     });
     const wrap = h('div', { class: 'field' },
-      h('label', { for: id, text: label }),
+      h('label', { for: id, text: label, class: hiddenLabel ? 'visually-hidden' : null }),
       input,
       help ? h('p', { id: `${id}-help`, class: 'help', text: help }) : null);
     return { wrap, input };
   }
 
-  function radioGroup(name, legend, options, selected) {
+  function radioGroup(name, legend, options, selected, { hiddenLegend = false } = {}) {
     const inputs = options.map(([value]) => {
       const input = h('input', { type: 'radio', name, value, id: `${name}-${value}` });
       input.checked = value === selected;
       return input;
     });
     const el = h('fieldset', { class: 'radios' },
-      h('legend', { text: legend }),
+      h('legend', { text: legend, class: hiddenLegend ? 'visually-hidden' : null }),
       options.map(([value, label], i) => h('label', { class: 'radio', for: `${name}-${value}` },
         inputs[i], h('span', { text: label }))));
     return {
@@ -1735,15 +1768,18 @@
    * Onaylı işlem diyaloğu. `onConfirm` hata atarsa diyalog açık kalır ve hata
    * içinde gösterilir; başarılıysa kapanır. İşlem sürerken kapatılamaz.
    */
-  function openDialog({ title, intro = null, fields = [], confirmText, tone = 'primary', onConfirm }) {
+  function openDialog({ title, intro = null, fields = [], confirmText, tone = 'primary', size = 'default', onConfirm }) {
     const error = h('p', { class: 'form-error', role: 'alert', hidden: true });
     const cancel = h('button', { type: 'button', class: 'btn btn-ghost', text: 'Vazgeç' });
     const confirm = h('button', { type: 'submit', class: `btn btn-${tone}`, text: confirmText });
-    const form = h('form', { class: 'stack' },
+    // Başlık ve onay satırı sabit, yalnız gövde kayar: uzun formlarda
+    // (yasaklama) "Yasakla" düğmesi ekranın altına kaçmasın.
+    const form = h('form', { class: 'dialog-form' },
       h('h2', { id: 'dialog-title', text: title }),
-      intro ? h('p', { class: 'muted', text: intro }) : null,
-      fields,
-      error,
+      h('div', { class: 'dialog-body' },
+        intro ? h('p', { class: 'muted', text: intro }) : null,
+        fields,
+        error),
       h('div', { class: 'dialog-actions' }, cancel, confirm));
 
     let busy = false;
@@ -1773,10 +1809,15 @@
       }
     });
 
+    dialog.className = size === 'wide' ? 'dialog-wide' : '';
     dialog.replaceChildren(form);
     dialog.showModal();
     // Yıkıcı işlemlerde varsayılan odak "Vazgeç"te kalır; metin alanı varsa oraya.
-    form.querySelector('textarea')?.focus();
+    // Dokunmatikte odaklanmıyoruz: klavye anında açılıp diyaloğun üst yarısını
+    // (hedef kullanıcı ve kapsam seçimi) ekran dışına itiyordu.
+    if (!window.matchMedia?.('(pointer: coarse)').matches) {
+      form.querySelector('textarea')?.focus();
+    }
   }
 
   function openInfoDialog(title, content) {
@@ -1787,9 +1828,10 @@
     dialog.onclick = (event) => {
       if (event.target === dialog) dialog.close();
     };
-    dialog.replaceChildren(h('div', { class: 'stack' },
+    dialog.className = '';
+    dialog.replaceChildren(h('div', { class: 'dialog-form' },
       h('h2', { id: 'dialog-title', text: title }),
-      content,
+      h('div', { class: 'dialog-body' }, content),
       h('div', { class: 'dialog-actions' }, close)));
     dialog.showModal();
   }
