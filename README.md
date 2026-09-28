@@ -12,6 +12,9 @@ ana repoda: `pomi/docs/MODERATION.md`.
 - **Şikayetler:** aynı mesaja gelen şikayetler tek vakada. Açıklar en eskiden
   yeniye, 24 saat sayacıyla. İçerik bulanık gelir, dokununca açılır. Mesajın
   öncesi ve sonrası "Bağlam" ile görülür.
+  Fotoğraflı mesajda "Fotoğrafı göster" görseli yükler (varsayılan kapalı;
+  kaldırılmışsa karantinadan, 30 gün). Kurulum: `pomi/docs/CHAT_IMAGES.md` —
+  CSP `connect-src`'ye Worker origin'i eklenmeli.
 - **İşlemler:** ihlal yok · mesajı kaldır · gönderen yasakla (24 saat / 7 gün /
   30 gün / kalıcı, gerekçe zorunlu ve kullanıcıya gösterilir) · yasağı kaldır.
 - **Duyurular:** uygulamadaki sayaç ekranının yan rayından (zil) açılan

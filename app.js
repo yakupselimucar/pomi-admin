@@ -706,12 +706,59 @@
       return;
     }
     if (token !== viewToken) return;
+    const images = await loadCaseImages(rows);
+    if (token !== viewToken) return;
     state.reportsLoadedAt = Date.now();
     if (state.reportStatus === 'open') setOpenCount(rows.length);
     list.removeAttribute('aria-busy');
     list.replaceChildren(...(rows.length
-      ? rows.map(caseCard)
+      ? rows.map((row) => caseCard(row, images.get(row.message_id)))
       : [emptyState(state.reportStatus === 'open' ? 'Açık şikayet yok. 🎉' : 'Kayıt yok.')]));
+  }
+
+  /**
+   * Fotoğraflı vakalar: mesaj kimliği → 10 dakikalık imzalı adres. Tek RPC.
+   * Fotoğraf özelliği kurulmamışsa (fonksiyon yok) boş döner, liste yine açılır.
+   */
+  async function loadCaseImages(rows) {
+    const ids = [...new Set(rows.map((row) => row.message_id).filter(Boolean))];
+    if (!ids.length) return new Map();
+    try {
+      const images = await rpc('admin_room_chat_image_urls', { p_message_ids: ids });
+      return new Map(images.map((image) => [image.message_id, image]));
+    } catch (err) {
+      console.warn('fotoğraflar okunamadı', err);
+      return new Map();
+    }
+  }
+
+  /**
+   * Şikayet edilen fotoğraf. Varsayılan kapalı (metin gibi): panelde gezinirken
+   * istemeden görülmesin. Görsel başka origin'de (Cloudflare Worker) ve yalnız
+   * bu panelin origin'ine CORS açık; `<img src>` yerine fetch → blob, çünkü
+   * Worker başka sitelerin gömmesini engelliyor (CORP same-origin).
+   */
+  function photoBlock(image) {
+    const note = image.quarantined
+      ? 'Kaldırıldı · yalnız moderasyon görür (30 gün)'
+      : 'Yayında · 7 gün sonra silinir';
+    const status = h('span', { class: 'muted small', text: note });
+    const holder = h('div', { class: 'content-photo' });
+    const reveal = button('Fotoğrafı göster', async () => {
+      setBusy(reveal, true, 'Yükleniyor…');
+      try {
+        const res = await fetch(image.url, { mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const url = URL.createObjectURL(await res.blob());
+        holder.replaceChildren(h('img', { src: url, alt: 'Şikayet edilen fotoğraf' }));
+        reveal.remove();
+      } catch (err) {
+        setBusy(reveal, false);
+        status.textContent = 'Fotoğraf yüklenemedi — bağlantının süresi dolmuş olabilir, listeyi yenile.';
+        console.warn('fotoğraf', err);
+      }
+    });
+    return h('div', { class: 'content-photo-wrap' }, holder, h('div', { class: 'row' }, reveal, status));
   }
 
   function slaChip(firstIso) {
@@ -756,11 +803,17 @@
     ];
   }
 
-  function contentBlock(row) {
+  function contentBlock(row, image) {
     const key = row.case_key;
-    const hasText = typeof row.body_snapshot === 'string' && row.body_snapshot.length > 0;
-    const body = h('p', { class: 'content-body', text: hasText ? row.body_snapshot : 'İçerik kaydı yok.' });
+    // Açıklamasız fotoğrafta uygulama gövdeye yalnız '📷' yazar.
+    const hasText = typeof row.body_snapshot === 'string' && row.body_snapshot.length > 0
+      && !(image && row.body_snapshot === '📷');
+    const body = h('p', {
+      class: 'content-body',
+      text: hasText ? row.body_snapshot : image ? 'Açıklamasız fotoğraf.' : 'İçerik kaydı yok.',
+    });
     const wrap = h('div', { class: 'content' }, body);
+    if (image) wrap.append(photoBlock(image));
     if (!hasText) return wrap;
 
     // İçerik varsayılan bulanık: panelde gezinirken istemeden okunmasın.
@@ -791,7 +844,7 @@
     return 'Mesaj şu an yayında.';
   }
 
-  function caseCard(row) {
+  function caseCard(row, image) {
     const open = row.open_count > 0;
     const live = Boolean(row.message_id) && !row.message_removed_at;
 
@@ -835,7 +888,7 @@
 
     return h('article', { class: `card case${open ? ' is-open' : ''}` },
       head,
-      contentBlock(row),
+      contentBlock(row, image),
       h('p', { class: 'muted small', text: messageStatus(row) }),
       meta,
       actions);

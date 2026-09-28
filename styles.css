@@ -555,6 +555,29 @@ textarea {
   user-select: text;
 }
 
+/* Şikayet edilen fotoğraf: yalnız "Fotoğrafı göster" ile yüklenir. */
+.content-photo-wrap {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.content-photo-wrap .row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.content-photo img {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  border-radius: 8px;
+  border: 2px solid var(--line);
+}
+
 /* ─── Duyurular ──────────────────────────────────────────────────────────── */
 
 .announcement-card {
