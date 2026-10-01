@@ -214,6 +214,7 @@ input[type="password"],
 input[type="text"],
 input[type="search"],
 input[type="datetime-local"],
+select,
 textarea {
   width: 100%;
   min-height: 44px;
@@ -363,13 +364,14 @@ textarea {
 
 /* ─── Sekmeler ────────────────────────────────────────────────────────── */
 
+/* Her genişlikte satır atlar: yatay kaydırmada tablette son sekmeler
+   ekran dışında kalıp keşfedilmiyordu. Masaüstünde tek satıra sığar. */
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  overflow-x: auto;
-  padding: 2px 2px 8px;
+  padding: 2px;
   margin-bottom: 16px;
-  scrollbar-width: thin;
 }
 
 .tab {
@@ -807,10 +809,7 @@ textarea {
   /* Sekmeler yatay kaydırma yerine satır atlar: 6 bölümün yarısı
      ekran dışında kalıp keşfedilmiyordu. */
   .tabs {
-    flex-wrap: wrap;
-    overflow-x: visible;
     gap: 6px;
-    padding-bottom: 0;
     margin-bottom: 14px;
   }
 
@@ -882,6 +881,7 @@ dialog.dialog-wide {
 
 #dialog h2 {
   flex: none;
+  overflow-wrap: anywhere;
   padding: 18px 20px 14px;
 }
 
@@ -1251,9 +1251,6 @@ dialog::backdrop {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  dialog.dialog-wide {
-    padding: 18px;
-  }
 }
 
 /* ─── Mobil diyalog: alt sayfa ────────────────────────────────────────────
@@ -1336,4 +1333,190 @@ dialog::backdrop {
 
 .session-row .chips {
   gap: 4px;
+}
+
+/* ─── Mobil uyum ──────────────────────────────────────────────────────────
+   Grid öğelerinin varsayılan `min-width: auto`'su, boşluksuz uzun bir
+   kullanıcı adı ya da UUID'yi kutunun dışına itiyordu (yasaklama diyaloğu
+   telefonda 465px'e genişliyordu). Sütunlar içeriğe değil kaba uyar. */
+.view,
+.list,
+.stack,
+.case,
+.card,
+.dialog-body,
+.announcement-card {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.name,
+.user-select-title,
+.user-select-info .muted,
+.user-candidate-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.user-select-card,
+.user-select-title,
+.user-candidate {
+  flex-wrap: wrap;
+}
+
+.user-select-info {
+  flex: 1 1 200px;
+}
+
+.user-candidate-name {
+  white-space: normal;
+}
+
+select {
+  appearance: none;
+  padding-right: 36px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text) 50%),
+    linear-gradient(135deg, var(--text) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.lang-block {
+  padding-top: 12px;
+  border-top: 2px dashed var(--line);
+}
+
+.lang-block:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* "Dil ekle" satırı: seçim kutusu esner, düğme yanında kalır. */
+.field > .actions:has(select) {
+  display: flex;
+  flex-wrap: nowrap;
+}
+
+.field > .actions select {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 560px) {
+  /* iOS Safari 16px altındaki alana odaklanınca sayfayı büyütüyor ve
+     geri küçültmüyor; yazı alanları 16px. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  /* Yedi sekme üç satır yerine iki satıra sığsın: her ekranın başında
+     ~170px gidiyordu. Dokunma hedefi 44px'te kalır. */
+  .tabs {
+    gap: 6px;
+  }
+
+  .tab {
+    gap: 6px;
+    padding: 6px 11px;
+    font-size: 0.9rem;
+  }
+
+  .count {
+    min-width: 20px;
+    padding: 0 6px;
+    font-size: 0.75rem;
+  }
+
+  .toolbar {
+    gap: 8px;
+  }
+
+  .segmented {
+    flex: 1 1 auto;
+  }
+
+  .seg {
+    flex: 1;
+    padding: 6px 10px;
+  }
+
+  .card {
+    padding: 14px;
+    box-shadow: 3px 3px 0 var(--shadow);
+  }
+
+  /* Bilgi listesi iki sütun: tek sütunda bir vaka kartı ekranı aşıyordu. */
+  .meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 12px;
+  }
+
+  /* Yarım sütundaki uzun etiketler ("Oda kimliğini kopyala",
+     "Seçilenleri geçersiz say") kırpılmasın, iki satıra insin. */
+  .actions .btn,
+  .dialog-actions .btn {
+    white-space: normal;
+    text-align: center;
+    line-height: 1.25;
+  }
+
+  /* Tek kalan son düğme satırı boydan kaplasın; boş yarım hücre kalmasın. */
+  .case .actions .btn:last-child:nth-child(odd),
+  .card .actions .btn:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+
+  /* Çip önce bütün halde alt satıra iner; yalnız tek başına satırı aşarsa
+     kendi içinde kırılır ("7 / şikayet" gibi bölünmesin). */
+  .chip {
+    flex-shrink: 0;
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .user-candidate-info {
+    flex-wrap: wrap;
+  }
+
+  .announcement-author {
+    margin-left: 0;
+  }
+
+  .log-row {
+    padding: 10px;
+  }
+
+  .qr {
+    width: min(200px, 100%);
+    height: auto;
+    aspect-ratio: 1;
+  }
+
+  .user-search-dropdown {
+    max-height: 50dvh;
+  }
+
+  .context {
+    max-height: none;
+  }
+
+  .content-photo img {
+    max-height: 60dvh;
+  }
+}
+
+/* Dokunmatik: odak halkası parmak dokunuşunda değil klavyede görünsün,
+   gri dokunma parlaması tasarımın basma efektiyle çakışmasın. */
+@media (pointer: coarse) {
+  a,
+  button,
+  label {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .tab {
+    min-height: 44px;
+  }
 }
