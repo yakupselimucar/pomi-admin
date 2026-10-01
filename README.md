@@ -2,7 +2,7 @@
 
 Pomi oda sohbeti şikayetlerini incelemek ve topluluk yasaklarını yönetmek için
 statik panel. GitHub Pages'te yayınlanır:
-<https://yakupselimucar.github.io/pomi-admin/>
+<https://admin.pomifocus.com/> (eski `yakupselimucar.github.io/pomi-admin/` adresi buraya 301 ile yönlenir)
 
 Kurulumun tamamı (migration, admin ekleme, Telegram bildirimi, mağaza formları)
 ana repoda: `pomi/docs/MODERATION.md`.
