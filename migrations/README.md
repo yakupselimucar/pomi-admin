@@ -25,6 +25,7 @@ Güncel hâli: `pomi/supabase/migrations/20260919213000_granular_user_bans.sql`.
 | `admin_ban_user` (8 parametre) | `20260919213000_granular_user_bans.sql` |
 | `admin_unban_user`, `admin_list_bans` | `20260919213000_granular_user_bans.sql` |
 | `admin_list_reports`, `admin_resolve_reports`, `admin_message_context` | pomi deposu |
+| `admin_focus_flags`, `admin_user_focus_sessions`, `admin_revoke_focus_sessions` | `20260930140000_focus_integrity_admin.sql` |
 
 `admin_list_reports` 2026-09-22'de `reporter_names` / `reporter_count` sütunlarıyla
 genişletildi (`pomi/supabase/migrations/20260922100000_report_reporter_names.sql`).

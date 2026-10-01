@@ -27,6 +27,12 @@ ana repoda: `pomi/docs/MODERATION.md`.
   - **Saldırı Müdahale Seçenekleri:** Saldırganların açtığı açık odaları derhal kapatma/silme, uygunsuz kullanıcı adını güvenli ada (`Domates#...`) sıfırlama, aktif odalardan çıkarma.
   - **Canlı Liste Filtreleme:** Yasaklılar listesinde kullanıcı adına veya gerekçeye göre anında arama.
   - İlgili SQL migration dosyası: `migrations/20260919213000_granular_user_bans.sql`.
+- **Odak denetimi:** sıralama hilesi işaretleri (çakışan seans, 30 dk'da 3 saat+
+  toplu geç teslim, günde 14 saat+). Sekmedeki sayı son 7 günün işaretli
+  kullanıcısıdır. "Seansları incele" ile seçilen seanslar geçersiz sayılır:
+  dakika sıralamadan, bitki bahçeden, coin bakiyeden düşer; seans kimliği
+  engellenir (uygulama yeniden gönderemez). XP/seviye değişmez. Arka plan:
+  `pomi/supabase/migrations/20260930120000_focus_session_integrity_guard.sql`.
 - **Kullanıcı arama** (kullanıcı adı, tam e-posta ya da kimlik) ve **İşlem kaydı** (1 yıl).
 
 Oda kurucuları şikayetleri görmez; bu panel tek inceleme yeridir.

@@ -1310,3 +1310,30 @@ dialog::backdrop {
     text-align: left;
   }
 }
+
+/* ─── Odak denetimi ───────────────────────────────────────────────────── */
+
+.session-list {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.session-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 2px 10px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: var(--soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.session-row .chips {
+  gap: 4px;
+}

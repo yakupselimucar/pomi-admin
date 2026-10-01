@@ -58,6 +58,9 @@
     announcement_create: 'Duyuru yayınlandı',
     announcement_update: 'Duyuru düzenlendi',
     announcement_delete: 'Duyuru silindi',
+    focus_revoke: 'Odak seansları geçersiz sayıldı',
+    season_reward_revoke: 'Sezon ödülü geri alındı',
+    season_compensation: 'Sezon telafisi verildi',
   };
   // Sunucu ikizi `announcements_kind_check`; renkler uygulamadaki etiketlerle aynı.
   const ANNOUNCEMENT_KINDS = [
@@ -123,6 +126,7 @@
     ['room_create_banned', 'Bu kullanıcının oda kurma yetkisi askıya alınmış.'],
     ['name_change_banned', 'Bu kullanıcının isim değiştirme yetkisi askıya alınmış.'],
     ['room_join_banned', 'Bu kullanıcının odalara katılma yetkisi askıya alınmış.'],
+    ['no_sessions', 'Geçersiz sayılacak seans seçilmedi (ya da seçilenler zaten silinmiş).'],
     ['failed to fetch', 'Bağlantı kurulamadı. İnternetini kontrol et.'],
     ['networkerror', 'Bağlantı kurulamadı. İnternetini kontrol et.'],
   ];
@@ -156,6 +160,7 @@
     revealed: new Set(),
     reportsLoadedAt: 0,
     userQuery: '',
+    focusDays: 7,
   };
   let shellMounted = false;
   // Sekme değişince eski isteğin sonucu yeni görünümü ezmesin.
@@ -600,6 +605,7 @@
     ['announcements', 'Duyurular'],
     ['rooms', 'Odalar'],
     ['bans', 'Yasaklılar'],
+    ['focus', 'Odak denetimi'],
     ['users', 'Kullanıcılar'],
     ['log', 'İşlem kaydı'],
   ];
@@ -608,6 +614,7 @@
     announcements: () => loadAnnouncements(),
     rooms: () => loadRooms(),
     bans: () => loadBans(),
+    focus: () => loadFocus(),
     users: () => renderUsers(),
     log: () => loadLog(),
   };
@@ -617,12 +624,14 @@
     const nav = h('nav', { class: 'tabs', 'aria-label': 'Bölümler' },
       TABS.map(([id, label]) => h('a', { href: `#${id}`, class: 'tab', id: `tab-${id}` },
         label,
-        id === 'reports' ? h('span', { class: 'count', id: 'open-count', hidden: true }) : null)));
+        id === 'reports' ? h('span', { class: 'count', id: 'open-count', hidden: true }) : null,
+        id === 'focus' ? h('span', { class: 'count', id: 'focus-count', hidden: true }) : null)));
     setPage(nav, h('div', { id: 'view', class: 'view' }));
     shellMounted = true;
     startIdleWatch();
     route();
     if (!(state.tab === 'reports' && state.reportStatus === 'open')) refreshOpenCount();
+    if (state.tab !== 'focus') refreshFocusCount();
   }
 
   window.addEventListener('hashchange', () => {
@@ -1530,6 +1539,208 @@
           : button('Yasakla', () => banDialog({ userId: row.user_id, name: row.username }), 'danger')));
   }
 
+  // ─── Odak denetimi ────────────────────────────────────────────────────────
+
+  /**
+   * Sıralama hilesi işaretleri. Sunucu (`admin_focus_flags`) üç işaret üretir;
+   * guard saat ileri alma ve paralel cihazı zaten kapıda durdurur, burada
+   * kalan: reddedilen denemeler, guard öncesi çakışmalar ve saati GERİ alıp
+   * geçmişi doldurma şüphesi (toplu geç teslim). Karar adminindir — çevrimdışı
+   * kuyruk da seansları geç ve toplu teslim eder.
+   */
+  const FOCUS_FLAGS = {
+    overlap: ['Çakışan seans', 'chip-danger',
+      'Aynı anda iki seans: iki cihazda paralel sayaç ya da saati ileri alma.'],
+    burst: ['Toplu geç teslim', 'chip-warn',
+      '30 gerçek dakikada 3 saatten fazla odak geldi. Çevrimdışı kuyruk da olabilir; gecikmelere bak.'],
+    day_cap: ['Günde 14 sa+', 'chip-warn', 'Tek günde 14 saatten fazla odak.'],
+  };
+  const FOCUS_DAYS = [[7, '7 gün'], [14, '14 gün'], [30, '30 gün']];
+
+  function minutesLabel(total) {
+    const hours = Math.floor(total / 60);
+    const minutes = total % 60;
+    if (!hours) return `${minutes} dk`;
+    return minutes ? `${hours} sa ${minutes} dk` : `${hours} sa`;
+  }
+
+  function setFocusCount(count) {
+    const badge = document.getElementById('focus-count');
+    if (!badge) return;
+    badge.textContent = String(count);
+    badge.setAttribute('aria-label', `${count} işaretli kullanıcı`);
+    badge.hidden = count === 0;
+  }
+
+  async function refreshFocusCount() {
+    try {
+      const rows = await rpc('admin_focus_flags', { p_days: 7 });
+      setFocusCount(rows.length);
+    } catch {
+      // Sayaç kritik değil; sekme kendi hatasını gösterir.
+    }
+  }
+
+  async function loadFocus() {
+    const token = ++viewToken;
+    const segmented = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Dönem' },
+      FOCUS_DAYS.map(([days, label]) => h('button', {
+        type: 'button',
+        class: 'seg',
+        'aria-pressed': String(state.focusDays === days),
+        text: label,
+        onclick: () => {
+          if (state.focusDays === days) return;
+          state.focusDays = days;
+          loadFocus();
+        },
+      })));
+    const list = h('div', { class: 'list', 'aria-busy': 'true' }, h('p', { class: 'muted', text: 'Yükleniyor…' }));
+    view().replaceChildren(
+      viewHeader('Odak denetimi', segmented, button('Yenile', () => loadFocus())),
+      h('p', {
+        class: 'muted small',
+        text: 'Sıralamayı bozabilecek odak kayıtları. Sunucu saat ileri alma ve paralel cihaz hilesini '
+          + 'kapıda durdurur; burada reddedilen denemeler, eski çakışmalar ve toplu geç teslimler görünür. '
+          + 'Geçersiz sayılan seansın dakikası, bitkisi ve coin\'i geri alınır.',
+      }),
+      list);
+
+    let rows;
+    try {
+      rows = await rpc('admin_focus_flags', { p_days: state.focusDays });
+    } catch (err) {
+      if (token === viewToken) list.replaceChildren(errorState(err, () => loadFocus()));
+      return;
+    }
+    if (token !== viewToken) return;
+    if (state.focusDays === 7) setFocusCount(rows.length);
+    list.removeAttribute('aria-busy');
+    list.replaceChildren(...(rows.length
+      ? rows.map(focusCard)
+      : [emptyState('İşaretli kullanıcı yok.')]));
+  }
+
+  function focusCard(row) {
+    const flags = row.reasons ?? [];
+    return h('article', { class: 'card' },
+      h('div', { class: 'chips' },
+        h('strong', { class: 'name', text: row.username }),
+        flags.map((flag) => {
+          const [label, tone, title] = FOCUS_FLAGS[flag] ?? [flag, '', ''];
+          return h('span', { class: `chip chip-small ${tone}`.trim(), text: label, title });
+        }),
+        row.revoked_total > 0
+          ? h('span', { class: 'chip chip-small chip-soft', text: `${row.revoked_total} seans geri alınmış` })
+          : null),
+      h('dl', { class: 'meta' },
+        metaItem('Dönemde odak', minutesLabel(row.period_minutes)),
+        row.overlap_count > 0
+          ? metaItem('Çakışan', `${row.overlap_count} seans · ${minutesLabel(row.overlap_minutes)}`)
+          : null,
+        row.rejected_count > 0
+          ? metaItem('Kapıda reddedilen', `${row.rejected_count} deneme · ${minutesLabel(row.rejected_minutes)}`)
+          : null,
+        metaItem('30 dk\'da en çok teslim', minutesLabel(row.burst_minutes)),
+        row.late_minutes > 0 ? metaItem('3 sa+ geç gelen', minutesLabel(row.late_minutes)) : null,
+        metaItem('En yoğun gün', minutesLabel(row.max_day_minutes)),
+        metaItem('Cihaz', String(row.device_count)),
+        row.last_received_at ? metaItem('Son teslim', formatDate(row.last_received_at)) : null),
+      h('div', { class: 'actions' },
+        button('Seansları incele', (event) => focusReviewDialog(row, event.currentTarget), 'primary'),
+        button('Kimliği kopyala', () => copyText(row.user_id, 'Kullanıcı kimliği')),
+        button('Yasakla', () => banDialog({ userId: row.user_id, name: row.username }), 'danger')));
+  }
+
+  /**
+   * Seans listesi + seçip geçersiz sayma. Çakışanlar önceden SEÇİLİ GELMEZ:
+   * bir çakışmanın iki tarafından hangisinin sahte olduğuna admin karar verir
+   * ("Çakışanları seç" ikisini birden seçer, biri bırakılmalı).
+   */
+  async function focusReviewDialog(row, trigger) {
+    setBusy(trigger, true, 'Yükleniyor…');
+    let sessions;
+    try {
+      sessions = await rpc('admin_user_focus_sessions', {
+        p_user_id: row.user_id,
+        p_days: Math.max(state.focusDays, 14),
+      });
+    } catch (err) {
+      toast(errorText(err), 'error');
+      return;
+    } finally {
+      if (trigger.isConnected) setBusy(trigger, false);
+    }
+
+    const STATUS = {
+      overlap: ['Kapıda reddedildi', 'chip-danger'],
+      admin_revoked: ['Geri alındı', 'chip-soft'],
+      superseded: ['Başka cihazda devralındı', 'chip-soft'],
+    };
+    const boxes = [];
+    const items = sessions.map((s) => {
+      const active = s.status === 'active';
+      const lag = s.lag_minutes ?? 0;
+      const box = active
+        ? h('input', { type: 'checkbox', id: `fs-${s.session_id}`, value: s.session_id })
+        : null;
+      if (box) boxes.push({ box, overlaps: s.overlaps });
+      const [statusLabel, statusTone] = STATUS[s.status] ?? [null, ''];
+      return h('li', { class: 'session-row' },
+        h(active ? 'label' : 'div', { class: 'check', for: active ? `fs-${s.session_id}` : null },
+          box,
+          h('span', { text: `${formatShort(s.completed_at)} · ${minutesLabel(s.minutes)}` })),
+        h('span', { class: 'chips' },
+          s.overlaps ? h('span', { class: 'chip chip-small chip-danger', text: 'Çakışıyor' }) : null,
+          active && lag > 180
+            ? h('span', { class: 'chip chip-small chip-warn', text: `${minutesLabel(lag)} geç geldi` })
+            : null,
+          active && lag < -3
+            ? h('span', { class: 'chip chip-small chip-warn', text: 'Gelecek tarihli' })
+            : null,
+          statusLabel ? h('span', { class: `chip chip-small ${statusTone}`, text: statusLabel }) : null));
+    });
+
+    const reason = textArea('focus-reason', 'Gerekçe', {
+      required: true,
+      maxLength: 300,
+      help: 'İşlem kaydında görünür; kullanıcıya gösterilmez.',
+    });
+    const selectOverlaps = button('Çakışanları seç', () => {
+      for (const { box, overlaps } of boxes) box.checked = overlaps;
+    }, 'ghost', { class: 'btn btn-ghost btn-small' });
+
+    openDialog({
+      title: `${row.username} · odak seansları`,
+      intro: 'Seçilen seansların dakikası sıralamadan, bitkisi bahçeden, kazandırdığı coin bakiyeden düşülür. '
+        + 'Seansın kimliği engellenir; uygulama yeniden göndermeye çalışsa da geri gelmez. XP/seviye değişmez.',
+      size: 'wide',
+      fields: [
+        boxes.some((b) => b.overlaps) ? selectOverlaps : null,
+        items.length
+          ? h('ol', { class: 'session-list' }, items)
+          : emptyState('Bu dönemde seans yok.'),
+        reason.wrap,
+      ],
+      confirmText: 'Seçilenleri geçersiz say',
+      tone: 'danger',
+      onConfirm: async () => {
+        const ids = boxes.filter(({ box }) => box.checked).map(({ box }) => box.value);
+        if (!ids.length) throw new UserError('Önce en az bir seans seç.');
+        const text = reason.input.value.trim();
+        if (!text) throw new UserError('Gerekçe zorunlu.');
+        const [result] = await rpc('admin_revoke_focus_sessions', {
+          p_user_id: row.user_id,
+          p_session_ids: ids,
+          p_reason: text,
+        });
+        toast(`${result?.sessions ?? ids.length} seans geçersiz sayıldı · `
+          + `${minutesLabel(result?.minutes ?? 0)} · ${result?.coins ?? 0} coin`);
+        afterMutation();
+      },
+    });
+  }
+
   // ─── İşlem kaydı ──────────────────────────────────────────────────────────
 
   function actionDetails(row) {
@@ -1546,6 +1757,13 @@
       const resetNote = details.reset_username ? ' · İsim sıfırlandı' : '';
       const closeNote = details.close_rooms ? ' · Odalar kapatıldı' : '';
       return `${scopesDesc}${durationLabel(details.hours ?? null)} · ${details.reason ?? ''}${resetNote}${closeNote}`;
+    }
+    if (row.action === 'focus_revoke') {
+      return `${details.sessions ?? 0} seans · ${minutesLabel(details.minutes ?? 0)} · `
+        + `${details.coins ?? 0} coin geri alındı · ${details.reason ?? ''}`;
+    }
+    if (row.action === 'season_reward_revoke' || row.action === 'season_compensation') {
+      return `${details.season ?? ''} · ${details.coins ?? 0} coin · ${details.reason ?? ''}`;
     }
     return details.note ? `Not: ${details.note}` : '';
   }
