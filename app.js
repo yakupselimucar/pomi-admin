@@ -59,6 +59,7 @@
     announcement_update: 'Duyuru düzenlendi',
     announcement_delete: 'Duyuru silindi',
     focus_revoke: 'Odak seansları geçersiz sayıldı',
+    garden_mark_remove: 'Bahçe işareti kaldırıldı',
     season_reward_revoke: 'Sezon ödülü geri alındı',
     season_compensation: 'Sezon telafisi verildi',
   };
@@ -161,6 +162,7 @@
     reportsLoadedAt: 0,
     userQuery: '',
     focusDays: 7,
+    markDays: 30,
   };
   let shellMounted = false;
   // Sekme değişince eski isteğin sonucu yeni görünümü ezmesin.
@@ -606,6 +608,7 @@
     ['rooms', 'Odalar'],
     ['bans', 'Yasaklılar'],
     ['focus', 'Odak denetimi'],
+    ['marks', 'Bahçe işaretleri'],
     ['users', 'Kullanıcılar'],
     ['log', 'İşlem kaydı'],
   ];
@@ -615,6 +618,7 @@
     rooms: () => loadRooms(),
     bans: () => loadBans(),
     focus: () => loadFocus(),
+    marks: () => loadMarks(),
     users: () => renderUsers(),
     log: () => loadLog(),
   };
@@ -1554,6 +1558,17 @@
     burst: ['Toplu geç teslim', 'chip-warn',
       '30 gerçek dakikada 3 saatten fazla odak geldi. Çevrimdışı kuyruk da olabilir; gecikmelere bak.'],
     day_cap: ['Günde 14 sa+', 'chip-warn', 'Tek günde 14 saatten fazla odak.'],
+    clock_mismatch: ['Süre kanıtı çelişiyor', 'chip-danger',
+      'Cihazın değiştirilemeyen saatine göre seans beyan edilen dakikadan kısa sürdü.'],
+    clock_unproven: ['Kanıtsız seans', 'chip-soft',
+      'Seans sırasında ya da teslimden önce cihaz yeniden başlamış; zaman kanıtlanamadı. Tek başına hile değildir.'],
+  };
+
+  /** Seans başına saat kanıtı (`focus_sessions.clock_proof`). Boş = eski sürüm. */
+  const CLOCK_PROOF = {
+    mismatch: ['Süre çelişiyor', 'chip-danger'],
+    unverified: ['Kanıtsız', 'chip-warn'],
+    unanchored: ['Zamanı kanıtsız', 'chip-soft'],
   };
   const FOCUS_DAYS = [[7, '7 gün'], [14, '14 gün'], [30, '30 gün']];
 
@@ -1601,7 +1616,8 @@
       h('p', {
         class: 'muted small',
         text: 'Sıralamayı bozabilecek odak kayıtları. Sunucu saat ileri alma ve paralel cihaz hilesini '
-          + 'kapıda durdurur; burada reddedilen denemeler, eski çakışmalar ve toplu geç teslimler görünür. '
+          + 'kapıda durdurur; yeni sürümler seans zamanını cihazın değiştirilemeyen saatiyle kanıtlar. '
+          + 'Burada reddedilen denemeler, eski çakışmalar, toplu geç teslimler ve kanıtsız seanslar görünür. '
           + 'Geçersiz sayılan seansın dakikası, bitkisi ve coin\'i geri alınır.',
       }),
       list);
@@ -1643,6 +1659,8 @@
           : null,
         metaItem('30 dk\'da en çok teslim', minutesLabel(row.burst_minutes)),
         row.late_minutes > 0 ? metaItem('3 sa+ geç gelen', minutesLabel(row.late_minutes)) : null,
+        row.mismatch_count > 0 ? metaItem('Süre kanıtı çelişen', `${row.mismatch_count} seans`) : null,
+        row.unproven_count > 0 ? metaItem('Kanıtsız', `${row.unproven_count} seans`) : null,
         metaItem('En yoğun gün', minutesLabel(row.max_day_minutes)),
         metaItem('Cihaz', String(row.device_count)),
         row.last_received_at ? metaItem('Son teslim', formatDate(row.last_received_at)) : null),
@@ -1686,6 +1704,10 @@
         : null;
       if (box) boxes.push({ box, overlaps: s.overlaps });
       const [statusLabel, statusTone] = STATUS[s.status] ?? [null, ''];
+      const [proofLabel, proofTone] = CLOCK_PROOF[s.clock_proof] ?? [null, ''];
+      // Kanıtlı seansta sunucu bitişi kendi saatiyle yazar; istemcinin beyanı
+      // bundan ne kadar saptıysa kullanıcının saati o kadar kaymıştı.
+      const skew = s.client_skew_minutes ?? 0;
       return h('li', { class: 'session-row' },
         h(active ? 'label' : 'div', { class: 'check', for: active ? `fs-${s.session_id}` : null },
           box,
@@ -1697,6 +1719,14 @@
             : null,
           active && lag < -3
             ? h('span', { class: 'chip chip-small chip-warn', text: 'Gelecek tarihli' })
+            : null,
+          proofLabel ? h('span', { class: `chip chip-small ${proofTone}`, text: proofLabel }) : null,
+          active && s.clock_proof === 'verified' && Math.abs(skew) > 10
+            ? h('span', {
+              class: 'chip chip-small chip-warn',
+              text: `Cihaz saati ${minutesLabel(Math.abs(skew))} ${skew > 0 ? 'ileri' : 'geri'}`,
+              title: 'İstemcinin beyan ettiği bitiş ile kanıtlanan gerçek bitiş arasındaki fark.',
+            })
             : null,
           statusLabel ? h('span', { class: `chip chip-small ${statusTone}`, text: statusLabel }) : null));
     });
@@ -1741,6 +1771,99 @@
     });
   }
 
+  // ─── Bahçe işaretleri (bomba) ─────────────────────────────────────────────
+
+  const MARK_DAYS = [[30, '30 gün'], [90, '90 gün'], [365, '1 yıl']];
+  // Sunucu ikizi `garden_tamper_marks_source_check`.
+  const MARK_SOURCES = {
+    client_clock: ['İstemci bildirdi', 'chip-danger',
+      'Seans sırasında saat ileri alındı ve sunucu saatiyle doğrulandı.'],
+    server_too_fast: ['Sunucu: çok hızlı', 'chip-danger',
+      'Sunucu defterine göre seans süresi dolmadan bitirildi (eski sürüm ya da değiştirilmiş istemci).'],
+  };
+
+  async function loadMarks() {
+    const token = ++viewToken;
+    const segmented = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Dönem' },
+      MARK_DAYS.map(([days, label]) => h('button', {
+        type: 'button',
+        class: 'seg',
+        'aria-pressed': String(state.markDays === days),
+        text: label,
+        onclick: () => {
+          if (state.markDays === days) return;
+          state.markDays = days;
+          loadMarks();
+        },
+      })));
+    const list = h('div', { class: 'list', 'aria-busy': 'true' }, h('p', { class: 'muted', text: 'Yükleniyor…' }));
+    view().replaceChildren(
+      viewHeader('Bahçe işaretleri', segmented, button('Yenile', () => loadMarks())),
+      h('p', {
+        class: 'muted small',
+        text: 'Saat ileri alarak seans uydurmaya çalışanların bahçesine düşen bombalar. İşaret 1 yıl sonra '
+          + 'kendiliğinden kalkar. Yanlış pozitif olduğunu düşünüyorsan kaldır: bahçeden hemen çıkar, '
+          + 'seans yine geçersiz kalır. Gerekçe işlem kaydına yazılır.',
+      }),
+      list);
+
+    let rows;
+    try {
+      rows = await rpc('admin_list_garden_marks', { p_days: state.markDays });
+    } catch (err) {
+      if (token === viewToken) list.replaceChildren(errorState(err, () => loadMarks()));
+      return;
+    }
+    if (token !== viewToken) return;
+    list.removeAttribute('aria-busy');
+    list.replaceChildren(...(rows.length
+      ? rows.map(markCard)
+      : [emptyState('Bu dönemde işaret yok.')]));
+  }
+
+  function markCard(row) {
+    const [sourceLabel, sourceTone, sourceHint] = MARK_SOURCES[row.source]
+      ?? [row.source, 'chip-soft', ''];
+    const removed = Boolean(row.removed_at);
+    const expired = !removed && new Date(row.expires_at) <= new Date();
+    return h('article', { class: 'card' },
+      h('div', { class: 'chips' },
+        h('strong', { class: 'name', text: row.username ?? 'Silinmiş hesap' }),
+        h('span', { class: `chip chip-small ${sourceTone}`, text: sourceLabel, title: sourceHint }),
+        removed ? h('span', { class: 'chip chip-small chip-done', text: 'Kaldırıldı' }) : null,
+        expired ? h('span', { class: 'chip chip-small chip-soft', text: 'Süresi doldu' }) : null),
+      h('p', { class: 'muted small' },
+        `Düştü: ${formatDate(row.created_at)} · Kalkış: ${formatDate(row.expires_at)}`),
+      removed || expired
+        ? null
+        : h('div', { class: 'actions' },
+          button('İşareti kaldır', () => removeMarkDialog(row), 'ghost',
+            { class: 'btn btn-ghost btn-small' })));
+  }
+
+  function removeMarkDialog(row) {
+    const reason = textArea('mark-reason', 'Gerekçe', {
+      required: true,
+      maxLength: 300,
+      help: 'İşlem kaydında görünür; kullanıcıya gösterilmez.',
+    });
+    openDialog({
+      title: `${row.username ?? 'Kullanıcı'} · bahçe işareti`,
+      intro: 'Bomba kullanıcının ve ziyaretçilerin bahçesinden hemen kalkar. Geçersiz sayılan seans '
+        + '(dakika, bitki, coin) geri gelmez.',
+      fields: [reason.wrap],
+      confirmText: 'İşareti kaldır',
+      tone: 'danger',
+      onConfirm: async () => {
+        const text = reason.input.value.trim();
+        if (!text) throw new UserError('Gerekçe zorunlu.');
+        await rpc('admin_remove_garden_mark', { p_mark_id: row.id, p_reason: text });
+        toast('Bahçe işareti kaldırıldı');
+        afterMutation();
+      },
+    });
+  }
+
   // ─── İşlem kaydı ──────────────────────────────────────────────────────────
 
   function actionDetails(row) {
@@ -1757,6 +1880,9 @@
       const resetNote = details.reset_username ? ' · İsim sıfırlandı' : '';
       const closeNote = details.close_rooms ? ' · Odalar kapatıldı' : '';
       return `${scopesDesc}${durationLabel(details.hours ?? null)} · ${details.reason ?? ''}${resetNote}${closeNote}`;
+    }
+    if (row.action === 'garden_mark_remove') {
+      return details.reason ? `Gerekçe: ${details.reason}` : '';
     }
     if (row.action === 'focus_revoke') {
       return `${details.sessions ?? 0} seans · ${minutesLabel(details.minutes ?? 0)} · `

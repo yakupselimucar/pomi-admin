@@ -33,6 +33,12 @@ ana repoda: `pomi/docs/MODERATION.md`.
   dakika sıralamadan, bitki bahçeden, coin bakiyeden düşer; seans kimliği
   engellenir (uygulama yeniden gönderemez). XP/seviye değişmez. Arka plan:
   `pomi/supabase/migrations/20260930120000_focus_session_integrity_guard.sql`.
+- **Bahçe işaretleri:** saat ileri alarak seans uydurmaya çalışanların bahçesine
+  düşen bombalar (30 gün / 90 gün / 1 yıl). Yanlış pozitifte "İşareti kaldır"
+  (zorunlu gerekçe, işlem kaydına yazılır); işaret 1 yıl sonra kendiliğinden
+  kalkar. Sunucu: `pomi/supabase/migrations/20261015120000_clock_tamper_enforcement.sql`
+  (`admin_list_garden_marks`, `admin_remove_garden_mark`). Migration push
+  edilmeden sekme hata gösterir.
 - **Kullanıcı arama** (kullanıcı adı, tam e-posta ya da kimlik) ve **İşlem kaydı** (1 yıl).
 
 Oda kurucuları şikayetleri görmez; bu panel tek inceleme yeridir.
