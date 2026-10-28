@@ -71,6 +71,16 @@
     ['important', 'Önemli', 'chip-danger'],
     ['fix', 'Hata Düzeltmesi', 'chip-soft'],
   ];
+  // Duyuru kanalı. Değer sunucudaki `platforms` dizisine çevrilir; sunucu ikizi
+  // `announcements_platforms_check`. Mobil tarafta ayrı bir ayar yok: RLS, istekteki
+  // `X-Client-Info` başlığından platformu okuyup süzer.
+  const ANNOUNCEMENT_CHANNELS = [
+    ['all', 'iOS + Android', ['ios', 'android']],
+    ['ios', 'Yalnız iOS', ['ios']],
+    ['android', 'Yalnız Android', ['android']],
+  ];
+  // "…'a/'e da gönder" düğmesi için yönelme hâli.
+  const PLATFORM_DATIVE = { ios: "iOS'a", android: "Android'e" };
   const ANNOUNCEMENT_TITLE_MAX = 80;
   const ANNOUNCEMENT_BODY_MAX = 600;
   // Duyuru dilleri. `tr` her zaman zorunludur; diğerleri düzenleme diyaloğunda seçerek eklenir.
@@ -123,6 +133,7 @@
     ['tr_required', 'Türkçe başlık ve metin zorunlu.'],
     ['translation_incomplete', 'Eklediğin her dil için başlık ve metnin ikisini de doldur, ya da o dili kaldır.'],
     ['translation_too_long', 'Başlık en fazla 80, metin en fazla 600 karakter olabilir.'],
+    ['invalid_platforms', 'Kanal seç: iOS, Android ya da ikisi.'],
     ['announcement_not_found', 'Duyuru bulunamadı (silinmiş olabilir).'],
     ['room_create_banned', 'Bu kullanıcının oda kurma yetkisi askıya alınmış.'],
     ['name_change_banned', 'Bu kullanıcının isim değiştirme yetkisi askıya alınmış.'],
@@ -1548,15 +1559,15 @@
   /**
    * Sıralama hilesi işaretleri. Sunucu (`admin_focus_flags`) üç işaret üretir;
    * guard saat ileri alma ve paralel cihazı zaten kapıda durdurur, burada
-   * kalan: reddedilen denemeler, guard öncesi çakışmalar ve saati GERİ alıp
-   * geçmişi doldurma şüphesi (toplu geç teslim). Karar adminindir — çevrimdışı
-   * kuyruk da seansları geç ve toplu teslim eder.
+   * kalan: reddedilen denemeler, guard öncesi çakışmalar ve günlük tavan.
+   *
+   * Sunucu hâlâ `burst` (toplu geç teslim) işareti üretebilir, ama saat
+   * kanıtı geldikten sonra bu işaret çevrimdışı kuyruğu hileden ayıramadığı
+   * için yalnızca gürültü: panelde gösterilmez (bkz. `withoutBurst`).
    */
   const FOCUS_FLAGS = {
     overlap: ['Çakışan seans', 'chip-danger',
       'Aynı anda iki seans: iki cihazda paralel sayaç ya da saati ileri alma.'],
-    burst: ['Toplu geç teslim', 'chip-warn',
-      '30 gerçek dakikada 3 saatten fazla odak geldi. Çevrimdışı kuyruk da olabilir; gecikmelere bak.'],
     day_cap: ['Günde 14 sa+', 'chip-warn', 'Tek günde 14 saatten fazla odak.'],
     clock_mismatch: ['Süre kanıtı çelişiyor', 'chip-danger',
       'Cihazın değiştirilemeyen saatine göre seans beyan edilen dakikadan kısa sürdü.'],
@@ -1579,6 +1590,21 @@
     return minutes ? `${hours} sa ${minutes} dk` : `${hours} sa`;
   }
 
+  /**
+   * Sunucudan gelen `burst` işaretini düşürür; yalnızca bu yüzden işaretlenmiş
+   * kullanıcıları listeden çıkarır. Sunucu RPC'sini değiştirmeden paneli
+   * temizlemenin tek yolu bu — sayaç ve liste aynı süzgeçten geçmeli ki
+   * rozetteki sayı ekrandakiyle tutsun.
+   */
+  function withoutBurst(rows) {
+    return rows.filter((row) => {
+      const reasons = row.reasons ?? [];
+      if (!reasons.includes('burst')) return true;
+      row.reasons = reasons.filter((flag) => flag !== 'burst');
+      return row.reasons.length > 0;
+    });
+  }
+
   function setFocusCount(count) {
     const badge = document.getElementById('focus-count');
     if (!badge) return;
@@ -1589,7 +1615,7 @@
 
   async function refreshFocusCount() {
     try {
-      const rows = await rpc('admin_focus_flags', { p_days: 7 });
+      const rows = withoutBurst(await rpc('admin_focus_flags', { p_days: 7 }));
       setFocusCount(rows.length);
     } catch {
       // Sayaç kritik değil; sekme kendi hatasını gösterir.
@@ -1617,14 +1643,14 @@
         class: 'muted small',
         text: 'Sıralamayı bozabilecek odak kayıtları. Sunucu saat ileri alma ve paralel cihaz hilesini '
           + 'kapıda durdurur; yeni sürümler seans zamanını cihazın değiştirilemeyen saatiyle kanıtlar. '
-          + 'Burada reddedilen denemeler, eski çakışmalar, toplu geç teslimler ve kanıtsız seanslar görünür. '
+          + 'Burada reddedilen denemeler, eski çakışmalar ve kanıtsız seanslar görünür. '
           + 'Geçersiz sayılan seansın dakikası, bitkisi ve coin\'i geri alınır.',
       }),
       list);
 
     let rows;
     try {
-      rows = await rpc('admin_focus_flags', { p_days: state.focusDays });
+      rows = withoutBurst(await rpc('admin_focus_flags', { p_days: state.focusDays }));
     } catch (err) {
       if (token === viewToken) list.replaceChildren(errorState(err, () => loadFocus()));
       return;
@@ -1657,8 +1683,6 @@
         row.rejected_count > 0
           ? metaItem('Kapıda reddedilen', `${row.rejected_count} deneme · ${minutesLabel(row.rejected_minutes)}`)
           : null,
-        metaItem('30 dk\'da en çok teslim', minutesLabel(row.burst_minutes)),
-        row.late_minutes > 0 ? metaItem('3 sa+ geç gelen', minutesLabel(row.late_minutes)) : null,
         row.mismatch_count > 0 ? metaItem('Süre kanıtı çelişen', `${row.mismatch_count} seans`) : null,
         row.unproven_count > 0 ? metaItem('Kanıtsız', `${row.unproven_count} seans`) : null,
         metaItem('En yoğun gün', minutesLabel(row.max_day_minutes)),
@@ -1869,7 +1893,11 @@
   function actionDetails(row) {
     const details = row.details ?? {};
     if (row.action.startsWith('announcement_')) {
-      return details.title ? `“${details.title}”` : '';
+      if (!details.title) return '';
+      // Kanal bilgisi migration öncesi kayıtlarda yok; o zaman yazılmaz.
+      return details.platforms
+        ? `“${details.title}” · ${channelLabel(details.platforms)}`
+        : `“${details.title}”`;
     }
     if (row.action === 'ban') {
       let scopesDesc = '';
@@ -1944,7 +1972,8 @@
       h('p', {
         class: 'muted small',
         text: 'Uygulamada sayaç ekranındaki raydan, zil ikonuyla açılır. Okunmamış olanlar rozetle '
-          + 'görünür. Push bildirimi gönderilmez. Yayın zamanı ileri bir tarihse duyuru o ana kadar gizli kalır.',
+          + 'görünür. Push bildirimi gönderilmez. Her duyuru iOS, Android ya da ikisine birden gider; '
+          + 'tek kanala gitmiş olanı kartından diğer kanala da gönderebilirsin.',
       }),
       list);
 
@@ -1960,15 +1989,42 @@
     list.replaceChildren(...(rows.length ? rows.map(announcementCard) : [emptyState('Henüz duyuru yok.')]));
   }
 
+  /**
+   * Sunucudaki `platforms` dizisi → kanal kimliği. Dizi hiç yoksa (migration
+   * henüz push edilmemiş) duyuru her iki platformda görünüyor demektir.
+   */
+  function channelId(platforms) {
+    const set = new Set(platforms ?? ANNOUNCEMENT_CHANNELS[0][2]);
+    const match = ANNOUNCEMENT_CHANNELS.find(([, , list]) => (
+      list.length === set.size && list.every((platform) => set.has(platform))));
+    return match?.[0] ?? 'all';
+  }
+
+  function channelLabel(platforms) {
+    return ANNOUNCEMENT_CHANNELS.find(([id]) => id === channelId(platforms))?.[1] ?? '';
+  }
+
+  /** Duyurunun ulaşmadığı kanal; ikisine de ulaşıyorsa `null`. */
+  function missingChannel(platforms) {
+    const current = channelId(platforms);
+    if (current === 'all') return null;
+    return current === 'ios' ? 'android' : 'ios';
+  }
+
   function announcementCard(row) {
     const scheduled = (toDate(row.published_at)?.getTime() ?? 0) > Date.now();
     const translations = row.translations ?? {};
     const tr = translations.tr ?? {};
     const others = Object.entries(translations).filter(([lang]) => lang !== 'tr');
+    const resendTo = missingChannel(row.platforms);
     return h('article', { class: 'card announcement-card' },
       h('div', { class: 'announcement-header' },
         h('div', { class: 'chips' },
           kindChip(row.kind),
+          h('span', {
+            class: `chip chip-small${resendTo ? ' chip-soft' : ''}`,
+            text: channelLabel(row.platforms),
+          }),
           scheduled
             ? h('span', { class: 'chip chip-soft', text: `Zamanlandı · ${formatShort(row.published_at)}` })
             : h('span', { class: 'chip chip-ok', text: 'Yayında' }),
@@ -1994,6 +2050,11 @@
           ? metaItem('Son düzenleme', formatDate(row.updated_at))
           : null),
       h('div', { class: 'actions' },
+        // Tek kanala gitmiş duyuru için kısayol: içerik kopyalanıp eksik kanala
+        // YENİ duyuru olarak yayınlanır (bkz. `announcementDialog` copy kipi).
+        resendTo
+          ? button(`${PLATFORM_DATIVE[resendTo]} da gönder`, () => announcementDialog(row, { copy: true }), 'primary')
+          : null,
         button('Düzenle', () => announcementDialog(row)),
         button('Sil', () => deleteAnnouncementDialog(row), 'danger')));
   }
@@ -2034,10 +2095,25 @@
     return { lang, wrap, titleField, bodyField };
   }
 
-  function announcementDialog(row) {
-    const editing = Boolean(row);
+  /**
+   * Yeni duyuru / düzenleme / kopya. `copy`: `row`un içeriğiyle YENİ duyuru açar
+   * (başka kanala gönderme). Düzenleme yayın saatini korur, bu yüzden uygulamada
+   * rozet çıkarmaz; kanala yeniden ulaşmak için kopya yeni yayın anı alır.
+   */
+  function announcementDialog(row, { copy = false } = {}) {
+    const editing = Boolean(row) && !copy;
     const kind = radioGroup('ann-kind', 'Tür',
       ANNOUNCEMENT_KINDS.map(([id, label]) => [id, label]), row?.kind ?? 'feature');
+    const channel = radioGroup('ann-channel', 'Kanal',
+      ANNOUNCEMENT_CHANNELS.map(([id, label]) => [id, label]),
+      copy ? (missingChannel(row.platforms) ?? 'all') : channelId(row?.platforms));
+    const channelHelp = h('p', {
+      class: 'help',
+      text: editing
+        ? 'Kanalı değiştirmek duyuruyu o platformda gösterir ya da gizler; yayın saati eski kaldığı için '
+          + 'yeni kanalda rozet çıkmaz. Rozetle ulaştırmak için kartındaki “… da gönder” düğmesini kullan.'
+        : 'Duyuru yalnız seçilen platformdaki kullanıcılara görünür.',
+    });
 
     const initialTranslations = row?.translations ?? { tr: { title: '', body: '' } };
     const blocks = new Map();
@@ -2078,12 +2154,21 @@
       .forEach(([lang, value]) => addBlock(lang, value));
     refreshLangOptions();
 
+    let title = 'Yeni duyuru';
+    let intro = 'Yayın saati kaydettiğin an otomatik atanır.';
+    if (editing) {
+      title = 'Duyuruyu düzenle';
+      intro = 'Yayın saati değişmez; ilk yayınlandığı an korunur.';
+    } else if (copy) {
+      title = `${PLATFORM_DATIVE[missingChannel(row.platforms)] ?? 'Diğer kanala'} gönder`;
+      intro = `Bu duyurunun kopyası yeni bir duyuru olarak yayınlanır; ${channelLabel(row.platforms)} `
+        + 'kanalındaki asıl duyuru değişmez. Göndermeden önce metni düzenleyebilirsin.';
+    }
+
     openDialog({
-      title: editing ? 'Duyuruyu düzenle' : 'Yeni duyuru',
-      intro: editing
-        ? 'Yayın saati değişmez; ilk yayınlandığı an korunur.'
-        : 'Yayın saati kaydettiğin an otomatik atanır.',
-      fields: [kind.el, langsWrap, addLangField],
+      title,
+      intro,
+      fields: [kind.el, h('div', { class: 'stack' }, channel.el, channelHelp), langsWrap, addLangField],
       confirmText: editing ? 'Kaydet' : 'Yayınla',
       onConfirm: async () => {
         const translations = {};
@@ -2098,9 +2183,11 @@
         }
         if (!translations.tr) throw new UserError('Türkçe başlık ve metin zorunlu.');
         await rpc('admin_save_announcement', {
-          p_id: row?.id ?? null,
+          p_id: editing ? row.id : null,
           p_kind: kind.value(),
           p_translations: translations,
+          p_platforms: ANNOUNCEMENT_CHANNELS.find(([id]) => id === channel.value())?.[2]
+            ?? ANNOUNCEMENT_CHANNELS[0][2],
         });
         toast(editing ? 'Duyuru kaydedildi' : 'Duyuru yayınlandı');
         afterMutation();

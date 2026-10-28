@@ -21,14 +21,23 @@ ana repoda: `pomi/docs/MODERATION.md`.
   yenilikler sayfası. Tür (yeni özellik / güncelleme / etkinlik), TR başlık +
   metin zorunlu, EN opsiyonel; duyuru saati ileri bir tarih seçilirse o ana
   kadar gizli kalır. Push gönderilmez, okunmamış rozeti cihazda tutulur.
+  **Kanal:** her duyuru iOS + Android, yalnız iOS ya da yalnız Android'e
+  gidebilir. Mobilde değişiklik yok: sunucu (RLS) isteğin `X-Client-Info`
+  başlığındaki platformu okuyup süzer. Tek kanala gitmiş duyurunun kartında
+  "Android'e de gönder" / "iOS'a da gönder" düğmesi çıkar; içerik kopyalanıp
+  yeni duyuru olarak yayınlanır (rozet yayın anına bağlı olduğu için eski
+  duyuruyu düzenlemek rozet çıkarmaz). Sunucu:
+  `pomi/supabase/migrations/20261028150000_announcement_platforms.sql`
+  (önce migration push, sonra panel).
 - **Yasaklılar:**
   - **Doğrudan Kullanıcı Engelleme:** Panelden ayrılmadan `+ Kullanıcı Engelle` ile anlık kullanıcı adı/e-posta/UUID arama ve doğrudan yasaklama.
   - **Granüler Yasak Kapsamı:** Oda kurma engeli, sohbet & tepki engeli, odaya katılma engeli, isim değiştirme engeli veya tam topluluk tecridi seçimi.
   - **Saldırı Müdahale Seçenekleri:** Saldırganların açtığı açık odaları derhal kapatma/silme, uygunsuz kullanıcı adını güvenli ada (`Domates#...`) sıfırlama, aktif odalardan çıkarma.
   - **Canlı Liste Filtreleme:** Yasaklılar listesinde kullanıcı adına veya gerekçeye göre anında arama.
   - İlgili SQL migration dosyası: `migrations/20260919213000_granular_user_bans.sql`.
-- **Odak denetimi:** sıralama hilesi işaretleri (çakışan seans, 30 dk'da 3 saat+
-  toplu geç teslim, günde 14 saat+). Sekmedeki sayı son 7 günün işaretli
+- **Odak denetimi:** sıralama hilesi işaretleri (çakışan seans, günde 14 saat+,
+  süre kanıtı çelişkisi). Sunucunun ürettiği "toplu geç teslim" işareti panelde
+  gösterilmez; yalnızca bu yüzden işaretli kullanıcılar listeden de düşer. Sekmedeki sayı son 7 günün işaretli
   kullanıcısıdır. "Seansları incele" ile seçilen seanslar geçersiz sayılır:
   dakika sıralamadan, bitki bahçeden, coin bakiyeden düşer; seans kimliği
   engellenir (uygulama yeniden gönderemez). XP/seviye değişmez. Arka plan:

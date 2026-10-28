@@ -31,7 +31,7 @@ Güncel hâli: `pomi/supabase/migrations/20260919213000_granular_user_bans.sql`.
 genişletildi (`pomi/supabase/migrations/20260922100000_report_reporter_names.sql`).
 Şikayet kartındaki "Şikayet eden" alanı bu iki sütuna bakar; migration push
 edilmeden panel yayınlanırsa alan boş kalır (hata vermez).
-| `admin_list_announcements`, `admin_save_announcement`, `admin_delete_announcement` | pomi deposu |
+| `admin_list_announcements`, `admin_save_announcement`, `admin_delete_announcement` | pomi deposu; kanal (`platforms`) için `20261028150000_announcement_platforms.sql` |
 
 Panelin yeni sürümü `admin_ban_user`'ı `p_scopes` / `p_reset_username` /
 `p_close_rooms` / `p_kick_rooms` ile çağırır. **Önce migration push edilmeli,
