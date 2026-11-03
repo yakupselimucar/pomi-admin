@@ -620,6 +620,7 @@
     ['bans', 'Yasaklılar'],
     ['focus', 'Odak denetimi'],
     ['marks', 'Bahçe işaretleri'],
+    ['updates', 'Güncelleme kapısı'],
     ['users', 'Kullanıcılar'],
     ['log', 'İşlem kaydı'],
   ];
@@ -630,6 +631,7 @@
     bans: () => loadBans(),
     focus: () => loadFocus(),
     marks: () => loadMarks(),
+    updates: () => loadUpdateGate(),
     users: () => renderUsers(),
     log: () => loadLog(),
   };
@@ -1886,6 +1888,57 @@
         afterMutation();
       },
     });
+  }
+
+  // ─── Güncelleme kapısı ────────────────────────────────────────────────────
+
+  const UPDATE_GATE_KINDS = {
+    user_report: ['Kullanıcı bildirdi', 'chip-warn',
+      'Kullanıcı güncelleme ekranında “Sorun bildir”e bastı. Mağaza açılıp hata gösteriyor olabilir '
+      + '(ülke dışı mağaza, kademeli yayın…).'],
+    store_open_failed: ['Mağaza açılamadı', 'chip-soft',
+      'Uygulama mağaza sayfasını hiç açamadı (mağaza uygulaması yok ya da engelli).'],
+  };
+
+  async function loadUpdateGate() {
+    const token = ++viewToken;
+    const list = h('div', { class: 'list', 'aria-busy': 'true' }, h('p', { class: 'muted', text: 'Yükleniyor…' }));
+    view().replaceChildren(
+      viewHeader('Güncelleme kapısı', button('Yenile', () => loadUpdateGate())),
+      h('p', {
+        class: 'muted small',
+        text: 'Zorunlu güncelleme ekranını geçemeyen kullanıcılar (son 14 gün). Aynı gün, platform, build, '
+          + 'tür ve bölge tek satırda toplanır; sayı kaç kez bildirildiğini gösterir. Kimlik saklanmaz. '
+          + 'Bölge cihaz dilinden gelir; mağaza hesabının ülkesi değildir. Düzeltme genellikle '
+          + 'app_config.min_build_number’ı düşürmek ya da mağaza yayınını/ülkesini düzeltmektir.',
+      }),
+      list);
+
+    let rows;
+    try {
+      rows = await rpc('admin_list_update_gate_reports', { p_days: 14 });
+    } catch (err) {
+      if (token === viewToken) list.replaceChildren(errorState(err, () => loadUpdateGate()));
+      return;
+    }
+    if (token !== viewToken) return;
+    list.removeAttribute('aria-busy');
+    list.replaceChildren(...(rows.length
+      ? rows.map(updateGateCard)
+      : [emptyState('Son 14 günde bildirim yok.')]));
+  }
+
+  function updateGateCard(row) {
+    const [kindLabel, kindTone, kindHint] = UPDATE_GATE_KINDS[row.kind] ?? [row.kind, 'chip-soft', ''];
+    return h('article', { class: 'card' },
+      h('div', { class: 'chips' },
+        h('strong', { class: 'name', text: `${row.platform === 'ios' ? 'iOS' : 'Android'} · build ${row.build_number}` }),
+        h('span', { class: `chip chip-small ${kindTone}`, text: kindLabel, title: kindHint }),
+        row.country ? h('span', { class: 'chip chip-small chip-soft', text: row.country }) : null,
+        h('span', { class: 'chip chip-small chip-soft', text: `${row.report_count} kez` })),
+      h('p', { class: 'muted small' },
+        `Gün: ${row.day} · İlk: ${formatDate(row.first_seen_at)} · Son: ${formatDate(row.last_seen_at)}`),
+      row.last_detail ? h('p', { class: 'muted small', text: `Ayrıntı: ${row.last_detail}` }) : null);
   }
 
   // ─── İşlem kaydı ──────────────────────────────────────────────────────────
