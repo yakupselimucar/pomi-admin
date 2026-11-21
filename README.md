@@ -34,7 +34,7 @@ ana repoda: `pomi/docs/MODERATION.md`.
   - **Granüler Yasak Kapsamı:** Oda kurma engeli, sohbet & tepki engeli, odaya katılma engeli, isim değiştirme engeli veya tam topluluk tecridi seçimi.
   - **Saldırı Müdahale Seçenekleri:** Saldırganların açtığı açık odaları derhal kapatma/silme, uygunsuz kullanıcı adını güvenli ada (`Domates#...`) sıfırlama, aktif odalardan çıkarma.
   - **Canlı Liste Filtreleme:** Yasaklılar listesinde kullanıcı adına veya gerekçeye göre anında arama.
-  - İlgili SQL migration dosyası: `migrations/20260919213000_granular_user_bans.sql`.
+  - Sunucu tarafı ve RPC listesi: `pomi/docs/MODERATION.md`.
 - **Odak denetimi:** sıralama hilesi işaretleri (çakışan seans, günde 14 saat+,
   süre kanıtı çelişkisi). Sunucunun ürettiği "toplu geç teslim" işareti panelde
   gösterilmez; yalnızca bu yüzden işaretli kullanıcılar listeden de düşer. Sekmedeki sayı son 7 günün işaretli

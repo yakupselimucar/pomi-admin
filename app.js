@@ -1900,32 +1900,171 @@
       'Uygulama mağaza sayfasını hiç açamadı (mağaza uygulaması yok ya da engelli).'],
   };
 
+  const UPDATE_GATE_REASONS = {
+    no_update_button: 'Mağazada “Güncelle” düğmesi yok',
+    store_error: 'Mağaza hata veriyor',
+    updated_still_here: 'Güncelledim ama ekran hâlâ çıkıyor',
+    store_not_opening: 'Mağaza açılmıyor',
+    other: 'Başka bir şey',
+  };
+
+  // Uygulamayı yükleyen mağazanın paket adı → okunur ad.
+  const INSTALLER_STORES = {
+    'com.android.vending': 'Google Play',
+    'com.google.android.feedback': 'Google Play',
+    'com.huawei.appmarket': 'Huawei AppGallery',
+    'com.sec.android.app.samsungapps': 'Samsung Galaxy Store',
+    'com.xiaomi.mipicks': 'Xiaomi GetApps',
+    'com.apple': 'App Store',
+    'com.apple.testflight': 'TestFlight',
+    'com.apple.simulator': 'Simülatör',
+    none: 'Mağaza dışı (APK / Xcode)',
+  };
+  const PLAY_INSTALLERS = new Set(['com.android.vending', 'com.google.android.feedback']);
+  // Flutter'ın minSdk'si ve iOS dağıtım hedefi (pomi/android, ios/Runner).
+  const MIN_ANDROID_SDK = 24;
+  const MIN_IOS_MAJOR = 15;
+
+  /**
+   * Tanıdan muhtemel nedeni çıkarır: [başlık, ton, ne yapılmalı].
+   * Sıra önemlidir: kesin işaretler (APK, eski cihaz) belirsizlerden önce.
+   */
+  function diagnoseUpdateGate(row) {
+    const d = row.diagnostics ?? {};
+    const store = d.installer_store;
+    const isAndroid = row.platform === 'android';
+    if (d.physical === false) {
+      return ['Emülatör / simülatör', 'chip-soft', 'Gerçek cihaz değil; büyük olasılıkla test.'];
+    }
+    if (isAndroid && d.sdk_int && d.sdk_int < MIN_ANDROID_SDK) {
+      return ['Cihaz yeni sürümü desteklemiyor', 'chip-danger',
+        `Android SDK ${d.sdk_int} < ${MIN_ANDROID_SDK}. Play güncellemeyi göstermez; min_build bu cihaz için aşılamaz.`];
+    }
+    const iosMajor = !isAndroid ? parseInt(String(d.os_version ?? '').replace(/^iOS\s*/, ''), 10) : NaN;
+    if (!isAndroid && iosMajor && iosMajor < MIN_IOS_MAJOR) {
+      return ['Cihaz yeni sürümü desteklemiyor', 'chip-danger', `iOS ${iosMajor} < ${MIN_IOS_MAJOR}.`];
+    }
+    if (store === 'none') {
+      return ['Mağaza dışından yüklenmiş', 'chip-danger',
+        isAndroid
+          ? 'APK ile kurulmuş: Play bu kurulumu güncelleyemez ("Güncelle" çıkmaz). Uygulamayı silip Play\'den kurmalı (giriş yaparsa veriler gelir).'
+          : 'Xcode/kurumsal kurulum: App Store güncelleyemez.'];
+    }
+    if (store === 'com.apple.testflight') {
+      return ['TestFlight kurulumu', 'chip-warn',
+        'App Store bu kurulumu güncellemez; TestFlight\'tan güncel build ya da App Store\'dan yeniden kurulum.'];
+    }
+    if (isAndroid && store && !PLAY_INSTALLERS.has(store)) {
+      return [`${INSTALLER_STORES[store] ?? store} kurulumu`, 'chip-danger',
+        'Play dışı bir mağazadan kurulmuş; o mağazada yeni sürüm yoksa güncellenemez. Silip Play\'den kurmalı.'];
+    }
+    if (d.store_result === 'failed') {
+      return ['Mağaza uygulaması açılamadı', 'chip-danger',
+        `Cihazda mağaza yok, devre dışı ya da engelli. Hata: ${d.store_error ?? '—'}`];
+    }
+    if (row.reason === 'updated_still_here') {
+      return ['Güncelleme kurulmamış', 'chip-warn',
+        'Rapor hâlâ eski build\'den geldi: indirme bitmemiş/askıda ya da ikinci bir kopya (iş profili, ikinci kullanıcı) açılıyor.'];
+    }
+    if (row.reason === 'no_update_button') {
+      return ['Mağaza güncellemeyi göstermiyor', 'chip-warn',
+        isAndroid
+          ? 'Play önbelleği ya da kademeli yayın. Play Console\'da yayın %100 mü bak; kullanıcı Play Store önbelleğini temizlemeli.'
+          : 'App Store önbelleği ya da sürüm bu ülkede henüz yok. Hesap ülkesini ve yayın durumunu kontrol et.'];
+    }
+    if (row.reason === 'store_error') {
+      return ['Mağaza hata veriyor', 'chip-warn',
+        isAndroid
+          ? 'Play hesabı/ülke kısıtı ya da cihaz uyumsuzluğu (Play Console → Cihaz kataloğu). Nota bak.'
+          : 'Büyük olasılıkla mağaza hesabının ülkesinde uygulama/sürüm yok. Nota bak.'];
+    }
+    if (row.reason === 'store_not_opening') {
+      return ['Mağaza açılmıyor', 'chip-warn', 'Mağaza uygulaması açılıp hemen kapanıyor olabilir; nota bak.'];
+    }
+    return ['Belirsiz', 'chip-soft', 'Tanı kesin bir işaret vermiyor; nota ve mağazada kalma süresine bak.'];
+  }
+
   async function loadUpdateGate() {
     const token = ++viewToken;
+    const details = h('div', { class: 'list', 'aria-busy': 'true' }, h('p', { class: 'muted', text: 'Yükleniyor…' }));
     const list = h('div', { class: 'list', 'aria-busy': 'true' }, h('p', { class: 'muted', text: 'Yükleniyor…' }));
     view().replaceChildren(
       viewHeader('Güncelleme kapısı', button('Yenile', () => loadUpdateGate())),
       h('p', {
         class: 'muted small',
-        text: 'Zorunlu güncelleme ekranını geçemeyen kullanıcılar (son 14 gün). Aynı gün, platform, build, '
-          + 'tür ve bölge tek satırda toplanır; sayı kaç kez bildirildiğini gösterir. Kimlik saklanmaz. '
-          + 'Bölge cihaz dilinden gelir; mağaza hesabının ülkesi değildir. Düzeltme genellikle '
-          + 'app_config.min_build_number’ı düşürmek ya da mağaza yayınını/ülkesini düzeltmektir.',
+        text: 'Zorunlu güncelleme ekranını geçemeyen kullanıcılar (son 14 gün). Yeni sürümler raporla birlikte '
+          + 'nedeni ve cihaz tanısını gönderir; “Muhtemel neden” bu tanıdan çıkarılır. Düzeltme genellikle '
+          + 'kullanıcıya yol göstermek, app_config.min_build_number’ı düşürmek ya da mağaza yayınını düzeltmektir.',
       }),
+      h('h3', { class: 'ban-section-title', text: 'Tanılı raporlar' }),
+      details,
+      h('h3', { class: 'ban-section-title', text: 'Günlük sayaç (tüm sürümler)' }),
       list);
 
-    let rows;
-    try {
-      rows = await rpc('admin_list_update_gate_reports', { p_days: 14 });
-    } catch (err) {
-      if (token === viewToken) list.replaceChildren(errorState(err, () => loadUpdateGate()));
-      return;
-    }
+    const [detailRes, aggRes] = await Promise.allSettled([
+      rpc('admin_list_update_gate_report_details', { p_days: 14 }),
+      rpc('admin_list_update_gate_reports', { p_days: 14 }),
+    ]);
     if (token !== viewToken) return;
+
+    details.removeAttribute('aria-busy');
+    if (detailRes.status === 'fulfilled') {
+      details.replaceChildren(...(detailRes.value.length
+        ? detailRes.value.map(updateGateDetailCard)
+        : [emptyState('Son 14 günde tanılı rapor yok.')]));
+    } else {
+      details.replaceChildren(errorState(detailRes.reason, () => loadUpdateGate()));
+    }
+
     list.removeAttribute('aria-busy');
-    list.replaceChildren(...(rows.length
-      ? rows.map(updateGateCard)
-      : [emptyState('Son 14 günde bildirim yok.')]));
+    if (aggRes.status === 'fulfilled') {
+      list.replaceChildren(...(aggRes.value.length
+        ? aggRes.value.map(updateGateCard)
+        : [emptyState('Son 14 günde bildirim yok.')]));
+    } else {
+      list.replaceChildren(errorState(aggRes.reason, () => loadUpdateGate()));
+    }
+  }
+
+  function updateGateDetailCard(row) {
+    const d = row.diagnostics ?? {};
+    const [kindLabel, kindTone] = UPDATE_GATE_KINDS[row.kind] ?? [row.kind, 'chip-soft'];
+    const [causeLabel, causeTone, causeHint] = diagnoseUpdateGate(row);
+    const store = d.installer_store ? (INSTALLER_STORES[d.installer_store] ?? d.installer_store) : '—';
+    const storeVisit = [
+      d.store_result ? { opened: 'mağaza açıldı', web: 'yalnız web açıldı', failed: 'açılamadı' }[d.store_result] ?? d.store_result : 'hiç denenmedi',
+      d.store_away_seconds != null ? `${d.store_away_seconds} sn kaldı` : null,
+      d.store_taps ? `${d.store_taps} deneme` : null,
+    ].filter(Boolean).join(' · ');
+    return h('article', { class: 'card' },
+      h('div', { class: 'chips' },
+        h('strong', {
+          class: 'name',
+          text: `${row.platform === 'ios' ? 'iOS' : 'Android'} · build ${row.build_number}`
+            + (row.min_build != null ? ` → ${row.min_build}` : ''),
+        }),
+        h('span', { class: `chip chip-small ${kindTone}`, text: kindLabel }),
+        row.country ? h('span', { class: 'chip chip-small chip-soft', text: row.country }) : null,
+        row.install_report_count > 1
+          ? h('span', { class: 'chip chip-small chip-soft', text: `aynı cihazdan ${row.install_report_count} rapor` })
+          : null),
+      h('p', null,
+        h('span', { class: `chip ${causeTone}`, text: `Muhtemel neden: ${causeLabel}` })),
+      h('p', { class: 'muted small', text: causeHint }),
+      h('dl', { class: 'meta' },
+        metaItem('Kullanıcının seçtiği', row.reason ? (UPDATE_GATE_REASONS[row.reason] ?? row.reason) : '— (otomatik)'),
+        metaItem('Yükleyen mağaza', store),
+        metaItem('Cihaz', [d.device, d.os_version].filter(Boolean).join(' · ') || '—'),
+        metaItem('Mağaza ziyareti', storeVisit),
+        metaItem('Ekranda', d.screen_seconds == null ? '—' : d.screen_seconds < 90 ? `${d.screen_seconds} sn` : formatSpan(d.screen_seconds * 1000)),
+        metaItem('Dil · saat dilimi', [d.locale, d.time_zone].filter(Boolean).join(' · ') || '—'),
+        metaItem('Kullanıcı', row.username ?? (row.user_id ? row.user_id : 'oturum yok')),
+        metaItem('Zaman', formatDate(row.created_at))),
+      row.note ? h('p', { class: 'small', text: `Not: “${row.note}”` }) : null,
+      d.store_error ? h('p', { class: 'muted small', text: `Mağaza hatası: ${d.store_error}` }) : null,
+      d.app_error || d.device_error
+        ? h('p', { class: 'muted small', text: `Tanı hatası: ${d.app_error ?? ''} ${d.device_error ?? ''}` })
+        : null);
   }
 
   function updateGateCard(row) {

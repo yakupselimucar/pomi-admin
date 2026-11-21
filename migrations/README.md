@@ -19,23 +19,5 @@ Güncel hâli: `pomi/supabase/migrations/20260919213000_granular_user_bans.sql`.
 
 ## Panelin bağlı olduğu RPC'ler
 
-| RPC | Nerede tanımlı |
-|---|---|
-| `admin_whoami`, `admin_find_users` | pomi deposu, moderasyon göçleri |
-| `admin_ban_user` (8 parametre) | `20260919213000_granular_user_bans.sql` |
-| `admin_unban_user`, `admin_list_bans` | `20260919213000_granular_user_bans.sql` |
-| `admin_list_reports`, `admin_resolve_reports`, `admin_message_context` | pomi deposu |
-| `admin_focus_flags`, `admin_user_focus_sessions`, `admin_revoke_focus_sessions` | `20260930140000_focus_integrity_admin.sql` |
-| `admin_list_update_gate_reports` (Güncelleme kapısı sekmesi) | `20261104120000_update_gate_reports.sql` |
-
-`admin_list_reports` 2026-09-22'de `reporter_names` / `reporter_count` sütunlarıyla
-genişletildi (`pomi/supabase/migrations/20260922100000_report_reporter_names.sql`).
-Şikayet kartındaki "Şikayet eden" alanı bu iki sütuna bakar; migration push
-edilmeden panel yayınlanırsa alan boş kalır (hata vermez).
-| `admin_list_announcements`, `admin_save_announcement`, `admin_delete_announcement` | pomi deposu; kanal (`platforms`) için `20261028150000_announcement_platforms.sql` |
-
-Panelin yeni sürümü `admin_ban_user`'ı `p_scopes` / `p_reset_username` /
-`p_close_rooms` / `p_kick_rooms` ile çağırır. **Önce migration push edilmeli,
-sonra panel yayınlanmalı** — aksi hâlde yasaklama tamamen hata verir
-(bilerek: eski imzaya sessizce düşmek, kapsamlı bir yasağı tam yasağa
-çevirirdi).
+Liste bilerek burada tutulmuyor: bu repo herkese açık. Güncel tablo
+`pomi/docs/MODERATION.md` içinde.
