@@ -15,6 +15,14 @@ ana repoda: `pomi/docs/MODERATION.md`.
   Fotoğraflı mesajda "Fotoğrafı göster" görseli yükler (varsayılan kapalı;
   kaldırılmışsa karantinadan, 30 gün). Kurulum: `pomi/docs/CHAT_IMAGES.md` —
   CSP `connect-src`'ye Worker origin'i eklenmeli.
+- **Kişi şikayetleri:** uygulamada arkadaş isteği, arkadaş listesi, sıralama,
+  oda ve Bölge Savaşları listelerinden "Şikayet et" ile gelir. Aynı kişiye
+  gelenler tek vakada; içerik yok, karar sinyallerle verilir (kaç kişi
+  şikayet etti, kaç kişi engelledi, mesaj şikayeti geçmişi, şikayetteki ad).
+  İşlemler: ihlal yok · adı sıfırla (yasaksız) · yasakla (vaka "işlem yapıldı"
+  olarak kapanır). Sunucu:
+  `pomi/supabase/migrations/20261126130000_user_reports_and_block_cleanup.sql`
+  (önce migration push, sonra panel; push edilmeden sekme hata gösterir).
 - **İşlemler:** ihlal yok · mesajı kaldır · gönderen yasakla (24 saat / 7 gün /
   30 gün / kalıcı, gerekçe zorunlu ve kullanıcıya gösterilir) · yasağı kaldır.
 - **Duyurular:** uygulamadaki sayaç ekranının yan rayından (zil) açılan

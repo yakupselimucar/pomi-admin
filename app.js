@@ -50,7 +50,30 @@
     removed: 'Mesaj kaldırıldı',
     banned: 'Gönderen yasaklandı',
   };
+  // Kişi şikayetleri (`user_reports`, migration 20261126130000).
+  const USER_REPORT_REASONS = {
+    inappropriate_name: 'Uygunsuz kullanıcı adı',
+    harassment: 'Taciz / istenmeyen temas',
+    spam: 'Spam / reklam',
+    other: 'Diğer',
+  };
+  const USER_REPORT_SOURCES = {
+    friend_request: 'Arkadaşlık isteği',
+    friend: 'Arkadaş listesi',
+    leaderboard: 'Sıralama',
+    room: 'Oda',
+    region: 'Bölge Savaşları',
+    season: 'Sezon',
+  };
+  const USER_RESOLUTIONS = {
+    dismissed: 'İhlal yok',
+    name_reset: 'Ad sıfırlandı',
+    actioned: 'İşlem yapıldı',
+  };
   const ACTIONS = {
+    user_reports_dismiss: 'Kişi şikayeti kapatıldı: ihlal yok',
+    user_reports_reset_name: 'Kişi şikayeti: ad sıfırlandı',
+    user_reports_actioned: 'Kişi şikayeti kapatıldı: işlem yapıldı',
     reports_dismiss: 'Şikayet kapatıldı: ihlal yok',
     reports_remove: 'Mesaj kaldırıldı',
     ban: 'Yasaklandı',
@@ -129,6 +152,7 @@
     ['user_not_found', 'Kullanıcı bulunamadı (hesap silinmiş olabilir).'],
     ['query_too_short', 'En az 2 karakter yaz.'],
     ['no_reports', 'İşlem yapılacak şikayet yok.'],
+    ['mixed_targets', 'Seçilen şikayetler farklı kişilere ait; listeyi yenileyip tekrar dene.'],
     ['invalid_kind', 'Duyuru türü seç.'],
     ['tr_required', 'Türkçe başlık ve metin zorunlu.'],
     ['translation_incomplete', 'Eklediğin her dil için başlık ve metnin ikisini de doldur, ya da o dili kaldır.'],
@@ -169,6 +193,7 @@
     email: '',
     tab: 'reports',
     reportStatus: 'open',
+    peopleStatus: 'open',
     revealed: new Set(),
     reportsLoadedAt: 0,
     userQuery: '',
@@ -615,6 +640,7 @@
 
   const TABS = [
     ['reports', 'Şikayetler'],
+    ['people', 'Kişi şikayetleri'],
     ['announcements', 'Duyurular'],
     ['rooms', 'Odalar'],
     ['bans', 'Yasaklılar'],
@@ -626,6 +652,7 @@
   ];
   const VIEWS = {
     reports: () => loadReports(),
+    people: () => loadPeople(),
     announcements: () => loadAnnouncements(),
     rooms: () => loadRooms(),
     bans: () => loadBans(),
@@ -642,12 +669,14 @@
       TABS.map(([id, label]) => h('a', { href: `#${id}`, class: 'tab', id: `tab-${id}` },
         label,
         id === 'reports' ? h('span', { class: 'count', id: 'open-count', hidden: true }) : null,
+        id === 'people' ? h('span', { class: 'count', id: 'people-count', hidden: true }) : null,
         id === 'focus' ? h('span', { class: 'count', id: 'focus-count', hidden: true }) : null)));
     setPage(nav, h('div', { id: 'view', class: 'view' }));
     shellMounted = true;
     startIdleWatch();
     route();
     if (!(state.tab === 'reports' && state.reportStatus === 'open')) refreshOpenCount();
+    if (!(state.tab === 'people' && state.peopleStatus === 'open')) refreshPeopleCount();
     if (state.tab !== 'focus') refreshFocusCount();
   }
 
@@ -668,14 +697,45 @@
     return document.getElementById('view');
   }
 
+  // Sekme başlığındaki sayı iki şikayet türünün toplamı: 24 saat kuralı
+  // ikisine de işliyor, biri gözden kaçmasın.
+  const openCounts = { messages: 0, people: 0 };
+
+  function updateTitle() {
+    const total = openCounts.messages + openCounts.people;
+    document.title = total ? `(${total}) ${BASE_TITLE}` : BASE_TITLE;
+  }
+
   function setOpenCount(count) {
+    openCounts.messages = count;
     const badge = document.getElementById('open-count');
     if (badge) {
       badge.textContent = String(count);
       badge.setAttribute('aria-label', `${count} açık vaka`);
       badge.hidden = count === 0;
     }
-    document.title = count ? `(${count}) ${BASE_TITLE}` : BASE_TITLE;
+    updateTitle();
+  }
+
+  function setPeopleCount(count) {
+    openCounts.people = count;
+    const badge = document.getElementById('people-count');
+    if (badge) {
+      badge.textContent = String(count);
+      badge.setAttribute('aria-label', `${count} açık kişi şikayeti`);
+      badge.hidden = count === 0;
+    }
+    updateTitle();
+  }
+
+  async function refreshPeopleCount() {
+    try {
+      const rows = await rpc('admin_list_user_reports', { p_status: 'open', p_limit: 500 });
+      setPeopleCount(rows.length);
+    } catch {
+      // Sayaç kritik değil; sekme kendi hatasını gösterir (migration
+      // push edilmeden fonksiyon yoktur).
+    }
   }
 
   async function refreshOpenCount() {
@@ -691,6 +751,7 @@
   function afterMutation() {
     route();
     if (!(state.tab === 'reports' && state.reportStatus === 'open')) refreshOpenCount();
+    if (!(state.tab === 'people' && state.peopleStatus === 'open')) refreshPeopleCount();
   }
 
   function viewHeader(title, ...tools) {
@@ -991,6 +1052,177 @@
     });
   }
 
+  // ─── Kişi şikayetleri ─────────────────────────────────────────────────────
+
+  /**
+   * Uygulamada arkadaş isteği, arkadaş listesi, sıralama, oda ve Bölge
+   * Savaşları listelerinden "Şikayet et" ile gelen kişi şikayetleri. Vaka =
+   * şikayet edilen kişi; geçmiş (kapanmış) şikayetler de sayılır ki tekrar
+   * eden davranış görünsün. Sunucu: `admin_list_user_reports`,
+   * `admin_resolve_user_reports` (migration 20261126130000).
+   *
+   * Mesaj şikayetinden farkı: ortada içerik yok — görülen tek şey ad ve
+   * davranış sinyalleri (kaç kişi şikayet etti, kaç kişi engelledi, mesaj
+   * şikayeti geçmişi). Şikayetçi kartta görünür, kişiye asla söylenmez.
+   */
+  async function loadPeople() {
+    const token = ++viewToken;
+    const statuses = [['open', 'Açık'], ['resolved', 'Çözülen'], ['all', 'Tümü']];
+    const segmented = h('div', { class: 'segmented', role: 'group', 'aria-label': 'Durum' },
+      statuses.map(([id, label]) => h('button', {
+        type: 'button',
+        class: 'seg',
+        'aria-pressed': String(state.peopleStatus === id),
+        text: label,
+        onclick: () => {
+          if (state.peopleStatus === id) return;
+          state.peopleStatus = id;
+          loadPeople();
+        },
+      })));
+    const list = h('div', { class: 'list', 'aria-busy': 'true' }, h('p', { class: 'muted', text: 'Yükleniyor…' }));
+    view().replaceChildren(
+      viewHeader('Kişi şikayetleri', segmented, button('Yenile', () => loadPeople())),
+      h('p', {
+        class: 'muted small',
+        text: 'Aynı kişiye gelen şikayetler tek vakada toplanır. Açıklar en eskiden yeniye; '
+          + 'mağaza kuralı gereği 24 saat içinde işlem yap.',
+      }),
+      list);
+
+    let rows;
+    try {
+      rows = await rpc('admin_list_user_reports', { p_status: state.peopleStatus, p_limit: 200 });
+    } catch (err) {
+      if (token === viewToken) list.replaceChildren(errorState(err, () => loadPeople()));
+      return;
+    }
+    if (token !== viewToken) return;
+    if (state.peopleStatus === 'open') setPeopleCount(rows.length);
+    list.removeAttribute('aria-busy');
+    list.replaceChildren(...(rows.length
+      ? rows.map((row) => personCard(row))
+      : [emptyState(state.peopleStatus === 'open' ? 'Açık kişi şikayeti yok. 🎉' : 'Kayıt yok.')]));
+  }
+
+  /** Şikayet anındaki adlar, şu anki addan farklıysa (ad değiştirilmiş). */
+  function earlierNames(row) {
+    const current = row.reported_name ?? '';
+    return (row.username_snapshots ?? []).filter((name) => name && name !== current);
+  }
+
+  function personCard(row) {
+    const open = row.open_count > 0;
+    const exists = Boolean(row.reported_id);
+    const openIds = row.open_report_ids ?? [];
+
+    const head = h('div', { class: 'chips' },
+      open
+        ? slaChip(row.first_open_at ?? row.first_reported_at)
+        : h('span', { class: 'chip chip-done', text: USER_RESOLUTIONS[row.resolution] ?? 'Çözüldü' }),
+      h('span', {
+        class: 'chip',
+        text: open && row.report_count > row.open_count
+          ? `${row.open_count} açık · ${row.report_count} toplam`
+          : `${row.report_count} şikayet`,
+      }),
+      (row.reasons ?? []).map((reason) => h('span', {
+        class: reason === 'harassment' ? 'chip chip-warn' : 'chip chip-soft',
+        text: USER_REPORT_REASONS[reason] ?? reason,
+      })));
+
+    const previous = earlierNames(row);
+    const meta = h('dl', { class: 'meta' },
+      metaItem('Kişi',
+        h('strong', { text: exists ? row.reported_name : 'Silinmiş hesap' }),
+        ' ',
+        banBadge(row.reported_banned, row.reported_banned_until)),
+      previous.length ? metaItem('Şikayetteki ad', previous.join(', ')) : null,
+      metaItem('Şikayet eden', ...reporterValue(row)),
+      metaItem('Nereden', (row.sources ?? []).map((src) => USER_REPORT_SOURCES[src] ?? src).join(', ')),
+      exists
+        ? metaItem('Sinyaller',
+          `${row.blocked_by_count} kişi engellemiş · ${row.message_report_total} mesaj şikayeti`)
+        : null,
+      metaItem('İlk şikayet', `${formatDate(row.first_reported_at)} · ${ago(row.first_reported_at)}`),
+      row.report_count > 1 ? metaItem('Son şikayet', formatDate(row.last_reported_at)) : null,
+      !open && row.reviewed_at ? metaItem('İncelendi', formatDate(row.reviewed_at)) : null,
+      row.admin_note ? metaItem('Not', row.admin_note) : null);
+
+    const actions = h('div', { class: 'actions' });
+    if (exists) {
+      actions.append(button('Kimliği kopyala', () => copyText(row.reported_id, 'Kullanıcı kimliği')));
+    }
+    if (open) {
+      actions.append(button('İhlal yok', () => resolvePersonDialog(row, 'dismiss')));
+      if (exists) {
+        actions.append(button('Adı sıfırla', () => resolvePersonDialog(row, 'reset_name'), 'warn'));
+      } else {
+        actions.append(button('İhlal var, kapat', () => resolvePersonDialog(row, 'actioned'), 'warn'));
+      }
+    }
+    if (exists) {
+      actions.append(row.reported_banned
+        ? button('Yasağı kaldır', () => unbanDialog(row.reported_id, row.reported_name))
+        : button('Yasakla', () => banDialog({
+          userId: row.reported_id,
+          name: row.reported_name,
+          userReportIds: open ? openIds : null,
+          suggestResetName: (row.reasons ?? []).includes('inappropriate_name'),
+        }), 'danger'));
+    }
+
+    return h('article', { class: `card case${open ? ' is-open' : ''}` }, head, meta, actions);
+  }
+
+  function resolvePersonDialog(row, action) {
+    const note = textArea('person-resolve-note', 'Not (isteğe bağlı)', {
+      help: 'Yalnız panelde ve işlem kaydında görünür; kullanıcıya gösterilmez.',
+    });
+    const copy = {
+      dismiss: {
+        title: 'İhlal yok',
+        intro: 'Açık şikayetler kapatılır. Kişiye hiçbir şey olmaz; engelleyenlerin engeli sürer.',
+        confirm: 'Kapat',
+        tone: 'primary',
+        done: 'Vaka kapatıldı',
+      },
+      reset_name: {
+        title: `${row.reported_name ?? 'Kişinin'} adı sıfırlansın mı?`,
+        intro: 'Kullanıcı adı güvenli bir ada (Domates#…) çevrilir ve açık şikayetler kapatılır. '
+          + 'Yasak verilmez; kişi yeni bir ad seçebilir (o da küfür filtresinden geçer). '
+          + 'Adını tekrar kötüye kullanırsa "Yasakla" → İsim Değiştirme Engeli.',
+        confirm: 'Adı sıfırla',
+        tone: 'warn',
+        done: 'Ad sıfırlandı',
+      },
+      actioned: {
+        title: 'İhlal var, kapat',
+        intro: 'Vaka "işlem yapıldı" olarak kapatılır. Hesap silinmiş olduğu için başka işlem yok.',
+        confirm: 'Kapat',
+        tone: 'warn',
+        done: 'Vaka kapatıldı',
+      },
+    }[action];
+
+    openDialog({
+      title: copy.title,
+      intro: copy.intro,
+      fields: [note.wrap],
+      confirmText: copy.confirm,
+      tone: copy.tone,
+      onConfirm: async () => {
+        await rpc('admin_resolve_user_reports', {
+          p_report_ids: row.open_report_ids ?? [],
+          p_action: action,
+          p_note: note.input.value.trim() || null,
+        });
+        toast(copy.done);
+        afterMutation();
+      },
+    });
+  }
+
   // ─── Odalar ───────────────────────────────────────────────────────────────
 
   /**
@@ -1089,7 +1321,14 @@
       content);
   }
 
-  function banDialog({ userId = null, name = null, reportIds = null, messageLive = false } = {}) {
+  function banDialog({
+    userId = null,
+    name = null,
+    reportIds = null,
+    messageLive = false,
+    userReportIds = null,
+    suggestResetName = false,
+  } = {}) {
     let targetUserId = userId;
     let targetName = name;
     let selectedUserEl = null;
@@ -1240,6 +1479,9 @@
     const resetNameBox = h('input', { type: 'checkbox', id: 'ban-reset-name' });
     const closeRoomsBox = h('input', { type: 'checkbox', id: 'ban-close-rooms' });
     const kickRoomsBox = h('input', { type: 'checkbox', id: 'ban-kick-rooms' });
+    // Kişi "uygunsuz ad" diye şikayet edildiyse ad sıfırlama önerilir (tek
+    // istisna; diğer temizlikler varsayılan kapalı kalır, gerekçe aşağıda).
+    resetNameBox.checked = suggestResetName;
 
     // Üçü de varsayılan olarak KAPALI. Oda silmek geri alınamaz ve odadaki
     // diğer herkesi de vurur — en kalabalık odada 48 kişi var. Tek bir
@@ -1377,6 +1619,22 @@
             await rpc('admin_resolve_reports', { p_report_ids: reportIds, p_action: 'remove', p_note: null });
           } catch (err) {
             toast(`Yasaklandı, ama mesaj kaldırılamadı: ${errorText(err)}`, 'error');
+            afterMutation();
+            return;
+          }
+        }
+        // Kişi şikayeti vakası: yasak verildi, açık şikayetleri "işlem
+        // yapıldı" olarak kapat. Yasak zaten yazıldı; bu adım düşerse vaka
+        // açık kalır ve "İhlal yok"/yeniden yasakla ile kapatılabilir.
+        if (userReportIds?.length) {
+          try {
+            await rpc('admin_resolve_user_reports', {
+              p_report_ids: userReportIds,
+              p_action: 'actioned',
+              p_note: `Yasak: ${text}`,
+            });
+          } catch (err) {
+            toast(`Yasaklandı, ama vaka kapatılamadı: ${errorText(err)}`, 'error');
             afterMutation();
             return;
           }
